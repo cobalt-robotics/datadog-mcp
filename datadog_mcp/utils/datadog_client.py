@@ -871,3 +871,104 @@ async def fetch_traces(
         except Exception as e:
             logger.error(f"Error fetching traces: {e}", exc_info=True)
             raise
+
+
+async def aggregate_traces(
+    time_range: str = "1h",
+    filters: Optional[Dict[str, str]] = None,
+    query: Optional[str] = None,
+    group_by: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """Aggregate APM traces using Datadog Analytics API.
+
+    Args:
+        time_range: Time range to look back (e.g., '1h', '4h', '1d', '7d')
+        filters: Filters to apply (e.g., {'service': 'web', 'env': 'prod'})
+        query: Free-text search query (e.g., '@duration:>8000000000')
+        group_by: List of fields to group by (e.g., ['env', 'service'])
+
+    Returns:
+        Dict containing aggregated trace counts grouped by specified fields
+    """
+    url = f"{DATADOG_API_URL}/api/v2/spans/analytics/aggregate"
+
+    headers = {
+        "Content-Type": "application/json",
+        "DD-API-KEY": DATADOG_API_KEY,
+        "DD-APPLICATION-KEY": DATADOG_APP_KEY,
+    }
+
+    # Build query filter
+    query_parts = []
+
+    # Add filters from the filters dictionary
+    if filters:
+        for key, value in filters.items():
+            # Handle special characters in values by quoting them
+            if " " in value or ":" in value:
+                query_parts.append(f'{key}:"{value}"')
+            else:
+                query_parts.append(f"{key}:{value}")
+
+    # Add free-text query
+    if query:
+        query_parts.append(query)
+
+    combined_query = " AND ".join(query_parts) if query_parts else "*"
+
+    # Build request body
+    payload = {
+        "data": {
+            "attributes": {
+                "filter": {
+                    "from": f"now-{time_range}",
+                    "to": "now",
+                    "query": combined_query,
+                },
+                "compute": [
+                    {
+                        "aggregation": "count",
+                        "type": "total"
+                    }
+                ],
+            },
+            "type": "aggregate_request",
+        }
+    }
+
+    # Add group by if specified
+    if group_by:
+        payload["data"]["attributes"]["group_by"] = [
+            {
+                "facet": field,
+                "type": "facet"
+            }
+            for field in group_by
+        ]
+
+    async with httpx.AsyncClient() as client:
+        try:
+            logger.debug(f"Aggregating traces with query: {combined_query}")
+            logger.debug(f"Group by: {group_by}")
+            logger.debug(f"Request payload: {json.dumps(payload, indent=2)}")
+
+            response = await client.post(url, headers=headers, json=payload, timeout=30.0)
+            response.raise_for_status()
+
+            result = response.json()
+
+            logger.debug(f"Successfully aggregated traces")
+            return result
+
+        except httpx.HTTPError as e:
+            logger.error(f"HTTP error aggregating traces: {e}")
+            if hasattr(e, 'response') and e.response is not None:
+                logger.error(f"Response status: {e.response.status_code}")
+                logger.error(f"Response body: {e.response.text}")
+            raise
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to decode JSON response: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"Error aggregating traces: {e}", exc_info=True)
+            raise

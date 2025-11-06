@@ -24,8 +24,8 @@ def get_tool_definition() -> Tool:
             "properties": {
                 "time_range": {
                     "type": "string",
-                    "description": "Time range to look back",
-                    "enum": ["1h", "4h", "8h", "1d", "7d", "14d", "30d"],
+                    "description": "Time range to look back (up to your plan's retention limit)",
+                    "enum": ["1h", "4h", "8h", "1d", "7d", "14d", "30d", "60d", "90d", "180d", "365d"],
                     "default": "1h",
                 },
                 "filters": {
@@ -52,8 +52,8 @@ def get_tool_definition() -> Tool:
                 },
                 "format": {
                     "type": "string",
-                    "description": "Output format",
-                    "enum": ["table", "text", "json", "debug"],
+                    "description": "Output format. Use 'summary' with include_children=true for large traces to avoid token limits - provides span counts, operation breakdown, and top slowest spans.",
+                    "enum": ["table", "text", "json", "debug", "summary"],
                     "default": "table",
                 },
                 "include_children": {
@@ -114,19 +114,42 @@ async def handle_call(request: CallToolRequest) -> CallToolResult:
                 if trace_id and trace_id not in trace_ids_seen:
                     trace_ids_seen.add(trace_id)
 
-                    # Fetch all spans for this trace_id
+                    # Fetch all spans for this trace_id with pagination
                     logger.debug(f"Fetching child spans for trace_id: {trace_id}")
-                    child_response = await fetch_traces(
-                        time_range=time_range,
-                        query=f"trace_id:{trace_id}",
-                        limit=1000,  # Get all spans in the trace
-                    )
+                    page_cursor = None
+                    page_num = 0
 
-                    if child_response and child_response.get("data"):
-                        all_spans.extend(child_response["data"])
-                    else:
-                        # If child fetch fails, include the original span
-                        all_spans.append(event)
+                    while True:
+                        page_num += 1
+                        child_response = await fetch_traces(
+                            time_range=time_range,
+                            query=f"trace_id:{trace_id}",
+                            limit=1000,  # Max per page
+                            cursor=page_cursor,
+                        )
+
+                        if child_response and child_response.get("data"):
+                            page_spans = child_response["data"]
+                            all_spans.extend(page_spans)
+                            logger.debug(f"  Page {page_num}: fetched {len(page_spans)} spans")
+
+                            # Check for more pages
+                            meta = child_response.get("meta", {})
+                            if meta is None:
+                                meta = {}
+                            page_info = meta.get("page", {})
+                            if page_info is None:
+                                page_info = {}
+                            page_cursor = page_info.get("after")
+
+                            if not page_cursor:
+                                # No more pages
+                                break
+                        else:
+                            # If child fetch fails, include the original span
+                            if page_num == 1:
+                                all_spans.append(event)
+                            break
                 else:
                     # No trace_id, just include the original span
                     all_spans.append(event)
@@ -171,7 +194,59 @@ async def handle_call(request: CallToolRequest) -> CallToolResult:
             )
 
         # Format output
-        if format_type == "debug":
+        if format_type == "summary":
+            # Summary format: compact statistics about the traces
+            from collections import Counter
+
+            summary_lines = []
+            summary_lines.append(f"Total spans: {len(traces)}")
+
+            # Group spans by trace_id to get trace-level stats
+            traces_by_id = {}
+            for trace in traces:
+                trace_id = trace.get("trace_id", "unknown")
+                if trace_id not in traces_by_id:
+                    traces_by_id[trace_id] = []
+                traces_by_id[trace_id].append(trace)
+
+            summary_lines.append(f"Unique traces: {len(traces_by_id)}")
+            summary_lines.append("")
+
+            # For each trace, show statistics
+            for trace_id, spans in traces_by_id.items():
+                summary_lines.append(f"Trace: {trace_id[:16]}...")
+
+                # Count by operation_name
+                operations = Counter(s.get("operation_name", "unknown") for s in spans)
+                summary_lines.append(f"  Total spans: {len(spans)}")
+
+                # Find root span (no parent_id or parent_id is "0")
+                root_spans = [s for s in spans if not s.get("parent_id") or s.get("parent_id") == "0"]
+                if root_spans:
+                    root = root_spans[0]
+                    summary_lines.append(f"  Root operation: {root.get('operation_name', 'unknown')}")
+                    summary_lines.append(f"  Total duration: {root.get('duration_ms', 0):.2f}ms")
+                    summary_lines.append(f"  Service: {root.get('service', 'unknown')}")
+                    summary_lines.append(f"  Resource: {root.get('resource_name', 'unknown')}")
+                    summary_lines.append(f"  Status: {root.get('status', 'unknown')}")
+                    if root.get("error"):
+                        summary_lines.append(f"  Error: Yes")
+
+                summary_lines.append(f"  Span breakdown:")
+                for op, count in operations.most_common(10):
+                    summary_lines.append(f"    {op}: {count}")
+
+                # Show top 5 slowest operations
+                slowest = sorted(spans, key=lambda s: s.get("duration_ms", 0), reverse=True)[:5]
+                summary_lines.append(f"  Top 5 slowest spans:")
+                for span in slowest:
+                    summary_lines.append(f"    {span.get('duration_ms', 0):.2f}ms - {span.get('operation_name', 'unknown')} - {span.get('resource_name', 'unknown')[:50]}")
+
+                summary_lines.append("")
+
+            content = "\n".join(summary_lines)
+
+        elif format_type == "debug":
             # Debug format: show raw API response for the first event
             sample_event = None
             if trace_events:
