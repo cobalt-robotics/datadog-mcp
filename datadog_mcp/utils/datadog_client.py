@@ -501,39 +501,55 @@ async def fetch_metric_field_values(
     metric_name: str,
     field_name: str,
 ) -> List[str]:
-    """Fetch all possible values for a specific field of a metric from Datadog API."""
-    
+    """Fetch all possible values for a specific field of a metric from Datadog API.
+
+    This queries the actual timeseries data grouped by the field to discover all values,
+    which is more reliable than the metadata endpoint for custom tags.
+    """
+
     headers = {
         "DD-API-KEY": DATADOG_API_KEY,
         "DD-APPLICATION-KEY": DATADOG_APP_KEY,
     }
-    
-    # Use the same endpoint as get_metric_fields but extract values for specific field
-    url = f"{DATADOG_API_URL}/api/v2/metrics/{metric_name}/all-tags"
-    
+
+    # Query the actual metric data grouped by the field to get all unique values
+    # This is more reliable than /all-tags for custom application tags
+    import time
+    to_timestamp = int(time.time())
+    from_timestamp = to_timestamp - 604800  # Last 7 days
+
+    # Build query: avg:metric{*} by {field}
+    query = f"avg:{metric_name}{{*}} by {{{field_name}}}"
+
+    params = {
+        "query": query,
+        "from": from_timestamp,
+        "to": to_timestamp,
+    }
+
+    url = f"{DATADOG_API_URL}/api/v1/query"
+
     async with httpx.AsyncClient() as client:
         try:
-            response = await client.get(url, headers=headers)
+            response = await client.get(url, headers=headers, params=params)
             response.raise_for_status()
             data = response.json()
-            
+
             field_values = set()
-            
-            # Extract values for the specific field from the tags
-            if "data" in data and "attributes" in data["data"]:
-                attributes = data["data"]["attributes"]
-                
-                # Get tags from the attributes
-                if "tags" in attributes:
-                    for tag in attributes["tags"]:
-                        # Tags are in format "field:value", extract values for the specific field
-                        if ":" in tag:
-                            tag_field, tag_value = tag.split(":", 1)
-                            if tag_field == field_name:
-                                field_values.add(tag_value)
-            
+
+            # Extract unique values from the series tag_set
+            if "series" in data:
+                for series in data["series"]:
+                    if "tag_set" in series:
+                        for tag in series["tag_set"]:
+                            # Tags are in format "field:value"
+                            if ":" in tag:
+                                tag_field, tag_value = tag.split(":", 1)
+                                if tag_field == field_name:
+                                    field_values.add(tag_value)
+
             return sorted(list(field_values))
-            
+
         except httpx.HTTPError as e:
             logger.error(f"HTTP error fetching metric field values: {e}")
             if hasattr(e, 'response') and e.response.status_code == 404:
