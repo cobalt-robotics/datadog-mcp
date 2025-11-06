@@ -351,17 +351,17 @@ async def fetch_metrics(
         # Datadog requires a scope - use {*} for "all sources" when no filters
         query_parts.append("{*}")
 
-    # Add .as_count() modifier if requested (for count/rate metrics)
-    # This converts rate metrics to totals instead of per-second rates
-    # Only use for count/rate metrics, NOT for gauge metrics
-    # MUST come before the 'by' clause in Datadog query syntax
-    if as_count:
-        query_parts.append(".as_count()")
-
-    # Add aggregation_by to the query if specified (after scope and modifiers)
+    # Add aggregation_by to the query if specified (must come before .as_count())
     if aggregation_by:
         by_clause = ",".join(aggregation_by)
         query_parts.append(f" by {{{by_clause}}}")
+
+    # Add .as_count() modifier if requested (for count/rate metrics)
+    # This converts rate metrics to totals instead of per-second rates
+    # Only use for count/rate metrics, NOT for gauge metrics
+    # MUST come AFTER the 'by' clause in Datadog query syntax
+    if as_count:
+        query_parts.append(".as_count()")
 
     query = "".join(query_parts)
     
