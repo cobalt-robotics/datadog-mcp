@@ -5,6 +5,7 @@
 [![UV](https://img.shields.io/badge/uv-package%20manager-blue)](https://github.com/astral-sh/uv)
 [![Podman](https://img.shields.io/badge/podman-892CA0?style=flat&logo=podman&logoColor=white)](https://podman.io)
 [![GitHub release](https://img.shields.io/github/v/release/hacctarr/datadog-mcp)](https://github.com/hacctarr/datadog-mcp/releases)
+[![PyPI](https://img.shields.io/pypi/v/datadog-mcp)](https://pypi.org/project/datadog-mcp/)
 
 A Model Context Protocol (MCP) server that provides comprehensive Datadog monitoring capabilities through Claude Desktop and other MCP clients.
 
@@ -30,7 +31,7 @@ Add to your Claude Desktop configuration (`~/Library/Application Support/Claude/
   "mcpServers": {
     "datadog": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/hacctarr/datadog-mcp.git@v0.0.6", "datadog-mcp"],
+      "args": ["datadog-mcp"],
       "env": {
         "DD_API_KEY": "your-datadog-api-key",
         "DD_APP_KEY": "your-datadog-application-key"
@@ -47,7 +48,7 @@ Add to your Claude Desktop configuration (`~/Library/Application Support/Claude/
 ```bash
 export DD_API_KEY="your-datadog-api-key"
 export DD_APP_KEY="your-datadog-application-key"
-uvx --from git+https://github.com/hacctarr/datadog-mcp.git@v0.0.6 datadog-mcp
+uvx datadog-mcp
 ```
 
 ### Development Setup
