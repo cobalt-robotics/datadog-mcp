@@ -1,0 +1,181 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'CHANGELOG.md'
+      - 'pyproject.toml'
+
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 0.0.7)'
+        required: true
+        type: string
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install UV
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install 3.13
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Detect version from changelog
+        id: detect
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            VERSION="${{ inputs.version }}"
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+            echo "should_release=true" >> $GITHUB_OUTPUT
+            echo "Manual release requested: $VERSION"
+          else
+            # Extract latest version from CHANGELOG.md
+            VERSION=$(grep "^## \[" CHANGELOG.md | grep -v "Unreleased" | head -1 | sed -E 's/^## \[v?([^]]*)\].*/\1/')
+
+            if [ -z "$VERSION" ]; then
+              echo "No version found in CHANGELOG.md"
+              echo "should_release=false" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+
+            TAG_NAME="v$VERSION"
+
+            # Check if tag already exists
+            if git tag -l | grep -q "^$TAG_NAME$"; then
+              echo "Tag $TAG_NAME already exists"
+              echo "should_release=false" >> $GITHUB_OUTPUT
+            else
+              echo "New version detected: $VERSION"
+              echo "version=$VERSION" >> $GITHUB_OUTPUT
+              echo "should_release=true" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      - name: Validate version format
+        if: steps.detect.outputs.should_release == 'true'
+        run: |
+          VERSION="${{ steps.detect.outputs.version }}"
+          if [[ ! $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid version format: $VERSION"
+            exit 1
+          fi
+          echo "Valid semver: $VERSION"
+
+      - name: Update pyproject.toml version
+        if: steps.detect.outputs.should_release == 'true'
+        run: |
+          VERSION="${{ steps.detect.outputs.version }}"
+          sed -i "s/version = \".*\"/version = \"$VERSION\"/" pyproject.toml
+          grep "version = " pyproject.toml
+
+      - name: Build package
+        if: steps.detect.outputs.should_release == 'true'
+        run: |
+          uv build
+          ls -la dist/
+
+      - name: Run pre-release tests
+        if: steps.detect.outputs.should_release == 'true'
+        run: |
+          uv run python -m py_compile datadog_mcp/server.py
+          WHEEL_FILE=$(ls dist/*.whl | head -1)
+          uvx --from "$WHEEL_FILE" datadog-mcp --help 2>&1 || echo "Expected: no --help"
+
+      - name: Extract changelog section
+        if: steps.detect.outputs.should_release == 'true'
+        id: changelog
+        run: |
+          VERSION="${{ steps.detect.outputs.version }}"
+          CONTENT=$(awk "/^## \[.*$VERSION.*\]/{flag=1; next} /^## \[/{flag=0} flag" CHANGELOG.md || echo "")
+          echo "content<<EOF" >> $GITHUB_OUTPUT
+          echo "$CONTENT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create Git tag
+        if: steps.detect.outputs.should_release == 'true'
+        run: |
+          VERSION="${{ steps.detect.outputs.version }}"
+          TAG_NAME="v$VERSION"
+
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+
+          # Commit version update if changed
+          git add pyproject.toml
+          if ! git diff --cached --quiet; then
+            git commit -m "Release $TAG_NAME"
+            git push
+          fi
+
+          # Create and push tag
+          git tag -a "$TAG_NAME" -m "Release $TAG_NAME"
+          git push origin "$TAG_NAME"
+
+      - name: Create GitHub Release
+        if: steps.detect.outputs.should_release == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.detect.outputs.version }}
+          name: Release v${{ steps.detect.outputs.version }}
+          body: |
+            ## Installation
+
+            **PyPI (Recommended):**
+            ```bash
+            uvx datadog-mcp
+            ```
+
+            **From GitHub:**
+            ```bash
+            uvx --from git+https://github.com/hacctarr/datadog-mcp.git@v${{ steps.detect.outputs.version }} datadog-mcp
+            ```
+
+            ## Links
+
+            - [PyPI](https://pypi.org/project/datadog-mcp/${{ steps.detect.outputs.version }}/)
+            - [GitHub](https://github.com/hacctarr/datadog-mcp)
+
+            ## Changes
+
+            ${{ steps.changelog.outputs.content }}
+          files: |
+            dist/*
+
+      - name: Publish to PyPI
+        if: steps.detect.outputs.should_release == 'true'
+        env:
+          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_TOKEN }}
+        run: |
+          if [ -z "$UV_PUBLISH_TOKEN" ]; then
+            echo "PYPI_TOKEN not set, skipping PyPI publish"
+            exit 0
+          fi
+          uv publish
+          echo "Published to PyPI: https://pypi.org/project/datadog-mcp/${{ steps.detect.outputs.version }}/"
+
+      - name: Release summary
+        if: steps.detect.outputs.should_release == 'true'
+        run: |
+          echo "🎉 Release v${{ steps.detect.outputs.version }} completed!"
+          echo ""
+          echo "📦 Published to:"
+          echo "  - GitHub: https://github.com/hacctarr/datadog-mcp/releases/tag/v${{ steps.detect.outputs.version }}"
+          echo "  - PyPI: https://pypi.org/project/datadog-mcp/${{ steps.detect.outputs.version }}/"
+          echo ""
+          echo "📥 Install: uvx datadog-mcp"

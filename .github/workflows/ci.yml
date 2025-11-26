@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install UV
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install 3.13
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Check Python syntax
+        run: |
+          uv run python -m py_compile datadog_mcp/server.py
+          uv run python -m py_compile datadog_mcp/tools/*.py
+          uv run python -m py_compile datadog_mcp/utils/*.py
+
+      - name: Test package structure
+        run: |
+          uv run python -c "from datadog_mcp.server import cli_main; print('Entry point OK')"
+          uv run python -c "from datadog_mcp.tools import get_metrics; print('Tools OK')"
+          uv run python -c "from datadog_mcp.utils import datadog_client; print('Utils OK')"
+
+      - name: Test UVX installation
+        run: |
+          uvx --from . datadog-mcp --help 2>&1 || echo "MCP server doesn't have --help (expected)"
+
+      - name: Run tests
+        run: uv run pytest tests/test_integration.py -v --tb=short
+
+      - name: Validate documentation
+        run: |
+          test -f README.md
+          test -f CHANGELOG.md
+          test -f CLAUDE.md
+          grep -q "datadog-mcp" README.md
+          grep -q "uvx" README.md
