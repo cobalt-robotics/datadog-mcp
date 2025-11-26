@@ -1,10 +1,10 @@
 # Datadog MCP Server
 
-[![CircleCI](https://img.shields.io/circleci/build/github/shelfio/datadog-mcp/main?style=flat&logo=circleci)](https://circleci.com/gh/shelfio/datadog-mcp/tree/main)
+[![CircleCI](https://img.shields.io/circleci/build/github/hacctarr/datadog-mcp/main?style=flat&logo=circleci)](https://circleci.com/gh/hacctarr/datadog-mcp/tree/main)
 [![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://python.org)
 [![UV](https://img.shields.io/badge/uv-package%20manager-blue)](https://github.com/astral-sh/uv)
 [![Podman](https://img.shields.io/badge/podman-892CA0?style=flat&logo=podman&logoColor=white)](https://podman.io)
-[![GitHub release](https://img.shields.io/github/v/release/shelfio/datadog-mcp)](https://github.com/shelfio/datadog-mcp/releases)
+[![GitHub release](https://img.shields.io/github/v/release/hacctarr/datadog-mcp)](https://github.com/hacctarr/datadog-mcp/releases)
 
 A Model Context Protocol (MCP) server that provides comprehensive Datadog monitoring capabilities through Claude Desktop and other MCP clients.
 
@@ -19,84 +19,18 @@ This MCP server enables Claude to:
 - **Service Definitions**: List and retrieve detailed service definitions with metadata, ownership, and configuration
 - **Team Management**: List teams, view member details, and manage team information
 
-## Quick Start
+## Installation
 
-Choose your preferred method to run the Datadog MCP server:
+### Claude Desktop (Recommended)
 
-### 🚀 UVX Direct Run (Recommended)
-```bash
-export DD_API_KEY="your-datadog-api-key" DD_APP_KEY="your-datadog-application-key"
+Add to your Claude Desktop configuration (`~/Library/Application Support/Claude/claude_desktop_config.json`):
 
-# Latest version (HEAD)
-uvx --from git+https://github.com/shelfio/datadog-mcp.git datadog-mcp
-
-# Specific version (recommended for production)
-uvx --from git+https://github.com/shelfio/datadog-mcp.git@v0.0.5 datadog-mcp
-
-# Specific branch
-uvx --from git+https://github.com/shelfio/datadog-mcp.git@main datadog-mcp
-```
-
-### 🔧 UV Quick Run (Development)
-```bash
-export DD_API_KEY="your-datadog-api-key" DD_APP_KEY="your-datadog-application-key"
-git clone https://github.com/shelfio/datadog-mcp.git /tmp/datadog-mcp && cd /tmp/datadog-mcp && uv run ddmcp/server.py
-```
-
-### 🐳 Podman (Optional)
-```bash
-podman run -e DD_API_KEY="your-datadog-api-key" -e DD_APP_KEY="your-datadog-application-key" -i $(podman build -q https://github.com/shelfio/datadog-mcp.git)
-```
-
-**Method Comparison:**
-
-| Method | Speed | Latest Code | Setup | Best For |
-|--------|-------|-------------|-------|----------|
-| 🚀 UVX Direct Run | ⚡⚡⚡ | ✅ (versioned) | Minimal | Production, Claude Desktop |
-| 🔧 UV Quick Run | ⚡⚡ | ✅ (bleeding edge) | Clone Required | Development, Testing |
-| 🐳 Podman | ⚡ | ✅ (bleeding edge) | Podman Required | Containerized Environments |
-
-## Requirements
-
-### For UVX/UV Methods  
-- Python 3.13+
-- UV package manager (includes uvx)
-- Datadog API Key and Application Key
-
-### For Podman Method
-- Podman
-- Datadog API Key and Application Key
-
-## Version Management
-
-When using UVX, you can specify exact versions for reproducible deployments:
-
-### Version Formats
-- **Latest**: `git+https://github.com/shelfio/datadog-mcp.git` (HEAD)
-- **Specific Tag**: `git+https://github.com/shelfio/datadog-mcp.git@v0.0.5`
-- **Branch**: `git+https://github.com/shelfio/datadog-mcp.git@main`
-- **Commit Hash**: `git+https://github.com/shelfio/datadog-mcp.git@59f0c15`
-
-### Recommendations
-- **Production**: Use specific tags (e.g., `@v0.0.5`) for stability
-- **Development**: Use latest or specific branch for newest features
-- **Testing**: Use commit hashes for exact reproducibility
-
-See [GitHub releases](https://github.com/shelfio/datadog-mcp/releases) for all available versions.
-
-## Claude Desktop Integration
-
-### Using UVX (Recommended)
-
-Add to Claude Desktop configuration:
-
-**Latest version (bleeding edge)**:
 ```json
 {
   "mcpServers": {
     "datadog": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/shelfio/datadog-mcp.git", "datadog-mcp"],
+      "args": ["--from", "git+https://github.com/hacctarr/datadog-mcp.git@v0.0.6", "datadog-mcp"],
       "env": {
         "DD_API_KEY": "your-datadog-api-key",
         "DD_APP_KEY": "your-datadog-application-key"
@@ -106,92 +40,24 @@ Add to Claude Desktop configuration:
 }
 ```
 
-**Specific version (recommended for production)**:
-```json
-{
-  "mcpServers": {
-    "datadog": {
-      "command": "uvx",
-      "args": ["--from", "git+https://github.com/shelfio/datadog-mcp.git@v0.0.5", "datadog-mcp"],
-      "env": {
-        "DD_API_KEY": "your-datadog-api-key",
-        "DD_APP_KEY": "your-datadog-application-key"
-      }
-    }
-  }
-}
-```
+**Requirements:** [UV package manager](https://github.com/astral-sh/uv) (includes uvx)
 
-### Using Local Development Setup
-
-For development with local cloned repository:
-```bash
-git clone https://github.com/shelfio/datadog-mcp.git
-cd datadog-mcp
-```
-
-Add to Claude Desktop configuration:
-```json
-{
-  "mcpServers": {
-    "datadog": {
-      "command": "uv",
-      "args": ["run", "ddmcp/server.py"],
-      "cwd": "/path/to/datadog-mcp",
-      "env": {
-        "DD_API_KEY": "your-datadog-api-key",
-        "DD_APP_KEY": "your-datadog-application-key"
-      }
-    }
-  }
-}
-```
-
-## Installation Options
-
-### UVX Installation (Recommended)
-
-Install and run directly from GitHub without cloning:
+### Command Line
 
 ```bash
 export DD_API_KEY="your-datadog-api-key"
 export DD_APP_KEY="your-datadog-application-key"
-
-# Latest version
-uvx --from git+https://github.com/shelfio/datadog-mcp.git datadog-mcp
-
-# Specific version (recommended for production)
-uvx --from git+https://github.com/shelfio/datadog-mcp.git@v0.0.5 datadog-mcp
+uvx --from git+https://github.com/hacctarr/datadog-mcp.git@v0.0.6 datadog-mcp
 ```
 
-### Development Installation
-
-For local development and testing:
-
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/shelfio/datadog-mcp.git
-   cd datadog-mcp
-   ```
-
-2. **Install dependencies:**
-   ```bash
-   uv sync
-   ```
-
-3. **Run the server:**
-   ```bash
-   export DD_API_KEY="your-datadog-api-key"
-   export DD_APP_KEY="your-datadog-application-key"
-   uv run ddmcp/server.py
-   ```
-
-### Podman Installation (Optional)
-
-For containerized environments:
+### Development Setup
 
 ```bash
-podman run -e DD_API_KEY="your-key" -e DD_APP_KEY="your-app-key" -i $(podman build -q https://github.com/shelfio/datadog-mcp.git)
+git clone https://github.com/hacctarr/datadog-mcp.git
+cd datadog-mcp
+uv sync
+export DD_API_KEY="your-datadog-api-key" DD_APP_KEY="your-datadog-application-key"
+uv run datadog_mcp/server.py
 ```
 
 ## Tools
