@@ -39,6 +39,23 @@ commands:
             sudo apt install gh -y
             gh --version
 
+  publish_to_pypi:
+    description: "Publish package to PyPI"
+    steps:
+      - run:
+          name: Publish to PyPI
+          command: |
+            echo "📦 Publishing to PyPI..."
+            if [ -z "$PYPI_TOKEN" ]; then
+              echo "⚠️  PYPI_TOKEN not set, skipping PyPI publish"
+              exit 0
+            fi
+
+            UV_PUBLISH_TOKEN="$PYPI_TOKEN" uv publish
+
+            echo "✅ Published to PyPI successfully"
+            echo "📦 Package available at: https://pypi.org/project/datadog-mcp/"
+
   validate_semver:
     description: "Validate semantic version format"
     parameters:
@@ -337,7 +354,7 @@ jobs:
           command: |
             echo "Checking README content..."
             grep -q "datadog-mcp" README.md || (echo "❌ Package name not found in README" && exit 1)
-            grep -q "uvx --from git+" README.md || (echo "❌ UVX installation instructions not found" && exit 1)
+            grep -q "uvx" README.md || (echo "❌ UVX installation instructions not found" && exit 1)
             echo "✅ README content validated"
 
   auto_release_detection:
@@ -488,24 +505,20 @@ jobs:
 
             ## Installation
 
-            **UVX (Recommended):**
+            **PyPI (Recommended):**
             \`\`\`bash
-            uvx --from git+https://github.com/shelfio/datadog-mcp.git@$TAG_NAME datadog-mcp
+            uvx datadog-mcp
             \`\`\`
 
-            **Development:**
+            **From GitHub:**
             \`\`\`bash
-            git clone https://github.com/shelfio/datadog-mcp.git
-            cd datadog-mcp
-            git checkout $TAG_NAME
-            uv sync && uv run ddmcp/server.py
+            uvx --from git+https://github.com/hacctarr/datadog-mcp.git@$TAG_NAME datadog-mcp
             \`\`\`
 
-            ## Package Files
+            ## Links
 
-            The following package files are attached to this release:
-            - \`datadog_mcp-$CLEAN_VERSION.tar.gz\` - Source distribution
-            - \`datadog_mcp-$CLEAN_VERSION-py3-none-any.whl\` - Python wheel
+            - PyPI: https://pypi.org/project/datadog-mcp/$CLEAN_VERSION/
+            - GitHub: https://github.com/hacctarr/datadog-mcp
 
             ## Changes
 
@@ -523,6 +536,7 @@ jobs:
             
             echo "✅ GitHub release created: $TAG_NAME"
             echo "📦 Packages uploaded to release"
+      - publish_to_pypi
       - run:
           name: Release Summary
           command: |
@@ -533,10 +547,11 @@ jobs:
             echo "  Tag: $TAG_NAME"
             echo "  Packages: $(ls dist/ | tr '\n' ' ')"
             echo ""
-            echo "🔗 GitHub Release: https://github.com/shelfio/datadog-mcp/releases/tag/$TAG_NAME"
+            echo "🔗 GitHub Release: https://github.com/hacctarr/datadog-mcp/releases/tag/$TAG_NAME"
+            echo "🔗 PyPI: https://pypi.org/project/datadog-mcp/$CLEAN_VERSION/"
             echo ""
-            echo "📥 Install with UVX:"
-            echo "  uvx --from git+https://github.com/shelfio/datadog-mcp.git@$TAG_NAME datadog-mcp"
+            echo "📥 Install:"
+            echo "  uvx datadog-mcp"
 
   auto_release:
     docker:
@@ -706,24 +721,20 @@ jobs:
 
             ## Installation
 
-            **UVX (Recommended):**
+            **PyPI (Recommended):**
             \`\`\`bash
-            uvx --from git+https://github.com/shelfio/datadog-mcp.git@$TAG_NAME datadog-mcp
+            uvx datadog-mcp
             \`\`\`
 
-            **Development:**
+            **From GitHub:**
             \`\`\`bash
-            git clone https://github.com/shelfio/datadog-mcp.git
-            cd datadog-mcp
-            git checkout $TAG_NAME
-            uv sync && uv run ddmcp/server.py
+            uvx --from git+https://github.com/hacctarr/datadog-mcp.git@$TAG_NAME datadog-mcp
             \`\`\`
 
-            ## Package Files
+            ## Links
 
-            The following package files are attached to this release:
-            - \`datadog_mcp-$CLEAN_VERSION.tar.gz\` - Source distribution
-            - \`datadog_mcp-$CLEAN_VERSION-py3-none-any.whl\` - Python wheel
+            - PyPI: https://pypi.org/project/datadog-mcp/$CLEAN_VERSION/
+            - GitHub: https://github.com/hacctarr/datadog-mcp
 
             ## Changes
 
@@ -741,6 +752,7 @@ jobs:
             
             echo "✅ GitHub release created: $TAG_NAME"
             echo "📦 Packages uploaded to release"
+      - publish_to_pypi
       - run:
           name: Auto-Release Summary
           command: |
@@ -752,10 +764,11 @@ jobs:
             echo "  Tag: $TAG_NAME"
             echo "  Packages: $(ls dist/ | tr '\n' ' ')"
             echo ""
-            echo "🔗 GitHub Release: https://github.com/shelfio/datadog-mcp/releases/tag/$TAG_NAME"
+            echo "🔗 GitHub Release: https://github.com/hacctarr/datadog-mcp/releases/tag/$TAG_NAME"
+            echo "🔗 PyPI: https://pypi.org/project/datadog-mcp/$CLEAN_VERSION/"
             echo ""
-            echo "📥 Install with UVX:"
-            echo "  uvx --from git+https://github.com/shelfio/datadog-mcp.git@$TAG_NAME datadog-mcp"
+            echo "📥 Install:"
+            echo "  uvx datadog-mcp"
 
 # Pipeline parameters for manual triggers
 parameters:
