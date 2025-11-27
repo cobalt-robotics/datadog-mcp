@@ -75,3 +75,7 @@ git clone https://github.com/hacctarr/datadog-mcp.git && cd datadog-mcp
 pip install -e .
 DD_API_KEY=xxx DD_APP_KEY=xxx datadog-mcp
 ```
+
+## Credits
+
+Originally created by [@andreidore](https://github.com/andreidore/datadog-mcp).
