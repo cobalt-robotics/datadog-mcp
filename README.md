@@ -1,36 +1,23 @@
 # Datadog MCP Server
 
 [![CI](https://github.com/hacctarr/datadog-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/hacctarr/datadog-mcp/actions/workflows/ci.yml)
-[![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://python.org)
-[![UV](https://img.shields.io/badge/uv-package%20manager-blue)](https://github.com/astral-sh/uv)
-[![Podman](https://img.shields.io/badge/podman-892CA0?style=flat&logo=podman&logoColor=white)](https://podman.io)
-[![GitHub release](https://img.shields.io/github/v/release/hacctarr/datadog-mcp)](https://github.com/hacctarr/datadog-mcp/releases)
 [![PyPI](https://img.shields.io/pypi/v/datadog-mcp)](https://pypi.org/project/datadog-mcp/)
+[![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://python.org)
 
-A Model Context Protocol (MCP) server that provides comprehensive Datadog monitoring capabilities through Claude Desktop and other MCP clients.
-
-## Features
-
-This MCP server enables Claude to:
-
-- **CI/CD Pipeline Management**: List CI pipelines, extract fingerprints
-- **Service Logs Analysis**: Retrieve and analyze service logs with environment and time filtering  
-- **Metrics Monitoring**: Query any Datadog metric with flexible filtering, aggregation, and field discovery
-- **Monitoring & Alerting**: List and manage Datadog monitors and Service Level Objectives (SLOs)
-- **Service Definitions**: List and retrieve detailed service definitions with metadata, ownership, and configuration
-- **Team Management**: List teams, view member details, and manage team information
+MCP server that gives Claude access to Datadog monitoring: metrics, logs, pipelines, monitors, SLOs, services, and teams.
 
 ## Installation
 
-### Claude Code (Simplest)
+**Requires:** [UV](https://github.com/astral-sh/uv) and [Datadog API credentials](#getting-datadog-credentials)
 
+### Claude Code
 ```bash
-claude mcp add datadog-mcp -e DD_API_KEY=your-key -e DD_APP_KEY=your-app-key
+claude mcp add datadog-mcp -e DD_API_KEY=xxx -e DD_APP_KEY=xxx
 ```
 
 ### Claude Desktop
 
-Add to your config (`~/Library/Application Support/Claude/claude_desktop_config.json`):
+Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 ```json
 {
@@ -39,184 +26,55 @@ Add to your config (`~/Library/Application Support/Claude/claude_desktop_config.
       "command": "uvx",
       "args": ["datadog-mcp"],
       "env": {
-        "DD_API_KEY": "your-datadog-api-key",
-        "DD_APP_KEY": "your-datadog-application-key"
+        "DD_API_KEY": "xxx",
+        "DD_APP_KEY": "xxx"
       }
     }
   }
 }
 ```
 
-### Command Line
-
+### Standalone
 ```bash
-DD_API_KEY=your-key DD_APP_KEY=your-app-key uvx datadog-mcp
-```
-
-### Development Setup
-
-```bash
-git clone https://github.com/hacctarr/datadog-mcp.git
-cd datadog-mcp
-uv sync
-export DD_API_KEY="your-datadog-api-key" DD_APP_KEY="your-datadog-application-key"
-uv run datadog_mcp/server.py
+DD_API_KEY=xxx DD_APP_KEY=xxx uvx datadog-mcp
 ```
 
 ## Tools
 
-The server provides these tools to Claude:
-
-### `list_ci_pipelines`
-Lists all CI pipelines registered in Datadog with filtering options.
-
-**Arguments:**
-- `repository` (optional): Filter by repository name
-- `pipeline_name` (optional): Filter by pipeline name  
-- `format` (optional): Output format - "table", "json", or "summary"
-
-### `get_pipeline_fingerprints` 
-Extracts pipeline fingerprints for use in Terraform service definitions.
-
-**Arguments:**
-- `repository` (optional): Filter by repository name
-- `pipeline_name` (optional): Filter by pipeline name
-- `format` (optional): Output format - "table", "json", or "summary"
-
-### `list_metrics`
-Lists all available metrics from Datadog for metric discovery.
-
-**Arguments:**
-- `filter` (optional): Filter to search for metrics by tags (e.g., 'aws:*', 'env:*', 'service:web')
-- `limit` (optional): Maximum number of metrics to return (default: 100, max: 10000)
-
-### `get_metrics`
-Queries any Datadog metric with flexible filtering and aggregation.
-
-**Arguments:**
-- `metric_name` (required): The metric name to query (e.g., 'aws.apigateway.count', 'system.cpu.user')
-- `time_range` (optional): "1h", "4h", "8h", "1d", "7d", "14d", "30d"
-- `aggregation` (optional): "avg", "sum", "min", "max", "count"
-- `filters` (optional): Dictionary of filters to apply (e.g., {'service': 'web', 'env': 'prod'})
-- `aggregation_by` (optional): List of fields to group results by
-- `format` (optional): "table", "summary", "json", "timeseries"
-
-### `get_metric_fields`
-Retrieves all available fields (tags) for a specific metric.
-
-**Arguments:**
-- `metric_name` (required): The metric name to get fields for
-- `time_range` (optional): "1h", "4h", "8h", "1d", "7d", "14d", "30d"
-
-### `get_metric_field_values`
-Retrieves all values for a specific field of a metric.
-
-**Arguments:**
-- `metric_name` (required): The metric name
-- `field_name` (required): The field name to get values for
-- `time_range` (optional): "1h", "4h", "8h", "1d", "7d", "14d", "30d"
-
-### `list_service_definitions`
-Lists all service definitions from Datadog with pagination and filtering.
-
-**Arguments:**
-- `page_size` (optional): Number of service definitions per page (default: 10, max: 100)
-- `page_number` (optional): Page number for pagination (0-indexed, default: 0)
-- `schema_version` (optional): Filter by schema version (e.g., 'v2', 'v2.1', 'v2.2')
-- `format` (optional): Output format - "table", "json", or "summary"
-
-### `get_service_definition`
-Retrieves the definition of a specific service with detailed metadata.
-
-**Arguments:**
-- `service_name` (required): Name of the service to retrieve
-- `schema_version` (optional): Schema version to retrieve (default: "v2.2", options: "v1", "v2", "v2.1", "v2.2")
-- `format` (optional): Output format - "formatted", "json", or "yaml"
-
-### `get_service_logs`
-Retrieves service logs with comprehensive filtering capabilities.
-
-**Arguments:**
-- `service_name` (required): Name of the service
-- `time_range` (required): "1h", "4h", "8h", "1d", "7d", "14d", "30d"
-- `environment` (optional): "prod", "staging", "backoffice"
-- `log_level` (optional): "INFO", "ERROR", "WARN", "DEBUG"
-- `format` (optional): "table", "text", "json", "summary"
-
-### `list_monitors`
-Lists all Datadog monitors with comprehensive filtering options.
-
-**Arguments:**
-- `name` (optional): Filter monitors by name (substring match)
-- `tags` (optional): Filter monitors by tags (e.g., 'env:prod,service:web')
-- `monitor_tags` (optional): Filter monitors by monitor tags (e.g., 'team:backend')
-- `page_size` (optional): Number of monitors per page (default: 50, max: 1000)
-- `page` (optional): Page number (0-indexed, default: 0)
-- `format` (optional): Output format - "table", "json", or "summary"
-
-### `list_slos`
-Lists Service Level Objectives (SLOs) from Datadog with filtering capabilities.
-
-**Arguments:**
-- `query` (optional): Filter SLOs by name or description (substring match)
-- `tags` (optional): Filter SLOs by tags (e.g., 'team:backend,env:prod')
-- `limit` (optional): Maximum number of SLOs to return (default: 50, max: 1000)
-- `offset` (optional): Number of SLOs to skip (default: 0)
-- `format` (optional): Output format - "table", "json", or "summary"
-
-### `get_teams`
-Lists teams and their members.
-
-**Arguments:**
-- `team_name` (optional): Filter by team name
-- `include_members` (optional): Include member details (default: false)
-- `format` (optional): "table", "json", "summary"
+| Tool | Description |
+|------|-------------|
+| `list_metrics` | Discover available metrics |
+| `get_metrics` | Query metrics with filters and aggregation |
+| `get_metric_fields` | Get available tags for a metric |
+| `get_metric_field_values` | Get values for a metric tag |
+| `get_service_logs` | Retrieve logs with filtering |
+| `list_monitors` | List monitors with filtering |
+| `list_slos` | List SLOs with filtering |
+| `list_service_definitions` | List service catalog entries |
+| `get_service_definition` | Get service details |
+| `list_ci_pipelines` | List CI pipelines |
+| `get_pipeline_fingerprints` | Extract pipeline fingerprints |
+| `get_teams` | List teams and members |
 
 ## Examples
 
-Ask Claude to help you with:
-
 ```
-"Show me all CI pipelines for the shelf-api repository"
-
-"Get error logs for the content service in the last 4 hours"
-
-"List all available AWS metrics"
-
-"What are the latest metrics for aws.apigateway.count grouped by account?"
-
-"Get all available fields for the system.cpu.user metric"
-
-"List all service definitions in my organization"
-
-"Get the definition for the user-api service"
-
-"List all teams and their members"
-
-"Show all monitors for the web service"
-
-"List SLOs with less than 99% uptime"
-
-"Extract pipeline fingerprints for Terraform configuration"
+"Get error logs for user-service in the last 4 hours"
+"Show metrics for aws.apigateway.count grouped by account"
+"List all monitors tagged env:prod"
+"What SLOs are below 99%?"
 ```
 
-## Configuration
+## Getting Datadog Credentials
 
-### Environment Variables
+1. Go to [Datadog Organization Settings](https://app.datadoghq.com/organization-settings/)
+2. **API Keys** → Create/copy key → `DD_API_KEY`
+3. **Application Keys** → Create/copy key → `DD_APP_KEY`
 
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `DD_API_KEY` | Datadog API Key | Yes |
-| `DD_APP_KEY` | Datadog Application Key | Yes |
+## Development
 
-### Obtaining Datadog Credentials
-
-1. Log in to your Datadog account
-2. Go to **Organization Settings** → **API Keys**
-3. Create or copy your **API Key** (this is your `DD_API_KEY`)
-4. Go to **Organization Settings** → **Application Keys**
-5. Create or copy your **Application Key** (this is your `DD_APP_KEY`)
-
-**Note:** These are two different keys:
-- **API Key**: Used for authentication with Datadog's API
-- **Application Key**: Used for authorization and is tied to a specific user account
+```bash
+git clone https://github.com/hacctarr/datadog-mcp.git && cd datadog-mcp
+uv sync
+DD_API_KEY=xxx DD_APP_KEY=xxx uv run datadog_mcp/server.py
+```
