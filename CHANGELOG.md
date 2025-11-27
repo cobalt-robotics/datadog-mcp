@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.0.7] - 2025-11-26
+
+### Added
+- **PyPI Publishing** - Package now available on PyPI for simple installation with `uvx datadog-mcp`
+- **GitHub Actions CI/CD** - Replaced CircleCI with GitHub Actions for testing and automated releases
+
+### Changed
+- **Simplified Installation** - Users can now install with just `uvx datadog-mcp` instead of long git URLs
+- **Repository Migration** - Updated all references to hacctarr/datadog-mcp fork
+- **Fixed Server Path** - Corrected server path from `ddmcp/server.py` to `datadog_mcp/server.py`
+
+### Technical
+- Added PyPI badge to README
+- Streamlined README from ~150 lines to ~40 lines for installation section
+- Auto-release workflow triggers on CHANGELOG.md updates
+
 ## [v0.0.6] - 2025-07-14
 
 ### Added
