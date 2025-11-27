@@ -8,7 +8,7 @@ MCP server that gives Claude access to Datadog monitoring: metrics, logs, pipeli
 
 ## Installation
 
-**Requires:** [UV](https://github.com/astral-sh/uv) and [Datadog API credentials](#getting-datadog-credentials)
+**Requires:** [Datadog API credentials](#getting-datadog-credentials)
 
 ### Claude Code
 ```bash
@@ -34,10 +34,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 }
 ```
 
-### Standalone
-```bash
-DD_API_KEY=xxx DD_APP_KEY=xxx uvx datadog-mcp
-```
+Requires [uvx](https://github.com/astral-sh/uv). Alternatively use `pipx run datadog-mcp`.
 
 ## Tools
 
@@ -75,6 +72,6 @@ DD_API_KEY=xxx DD_APP_KEY=xxx uvx datadog-mcp
 
 ```bash
 git clone https://github.com/hacctarr/datadog-mcp.git && cd datadog-mcp
-uv sync
-DD_API_KEY=xxx DD_APP_KEY=xxx uv run datadog_mcp/server.py
+pip install -e .
+DD_API_KEY=xxx DD_APP_KEY=xxx datadog-mcp
 ```
