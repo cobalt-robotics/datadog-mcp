@@ -92,6 +92,9 @@ jobs:
 
       - name: Run pre-release tests
         if: steps.detect.outputs.should_release == 'true'
+        env:
+          DD_API_KEY: test_key
+          DD_APP_KEY: test_key
         run: |
           uv run python -m py_compile datadog_mcp/server.py
           WHEEL_FILE=$(ls dist/*.whl | head -1)

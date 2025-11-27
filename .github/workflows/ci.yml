@@ -24,22 +24,34 @@ jobs:
         run: uv sync --all-extras
 
       - name: Check Python syntax
+        env:
+          DD_API_KEY: test_key
+          DD_APP_KEY: test_key
         run: |
           uv run python -m py_compile datadog_mcp/server.py
           uv run python -m py_compile datadog_mcp/tools/*.py
           uv run python -m py_compile datadog_mcp/utils/*.py
 
       - name: Test package structure
+        env:
+          DD_API_KEY: test_key
+          DD_APP_KEY: test_key
         run: |
           uv run python -c "from datadog_mcp.server import cli_main; print('Entry point OK')"
           uv run python -c "from datadog_mcp.tools import get_metrics; print('Tools OK')"
           uv run python -c "from datadog_mcp.utils import datadog_client; print('Utils OK')"
 
       - name: Test UVX installation
+        env:
+          DD_API_KEY: test_key
+          DD_APP_KEY: test_key
         run: |
           uvx --from . datadog-mcp --help 2>&1 || echo "MCP server doesn't have --help (expected)"
 
       - name: Run tests
+        env:
+          DD_API_KEY: test_key
+          DD_APP_KEY: test_key
         run: uv run pytest tests/test_integration.py -v --tb=short
 
       - name: Validate documentation
