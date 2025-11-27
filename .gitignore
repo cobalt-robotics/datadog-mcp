@@ -105,3 +105,6 @@ dmypy.json
 
 # MCP cache files
 .*_cache*.json
+
+# Claude Code local settings (may contain secrets)
+.claude/
