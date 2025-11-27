@@ -166,36 +166,6 @@ Tests are organized by feature area and require real Datadog API access:
 - Tests cover both success and error scenarios
 - Each tool has dedicated test coverage
 
-## Claude Desktop Integration
+## Usage
 
-The server integrates with Claude Desktop via MCP configuration:
-
-### Default UVX Integration (Recommended)
-```json
-{
-  "mcpServers": {
-    "datadog": {
-      "command": "uvx",
-      "args": ["datadog-mcp"],
-      "env": {
-        "DD_API_KEY": "your-datadog-api-key",
-        "DD_APP_KEY": "your-datadog-application-key"
-      }
-    }
-  }
-}
-```
-
-### Alternative Podman Integration
-```json
-{
-  "mcpServers": {
-    "datadog": {
-      "command": "podman",
-      "args": ["run", "-i", "-e", "DD_API_KEY=${DD_API_KEY}", "-e", "DD_APP_KEY=${DD_APP_KEY}", "magistersart/datadog-mcp:latest"]
-    }
-  }
-}
-```
-
-The server provides comprehensive Datadog monitoring through conversational commands like "Show CI pipelines for my-repo" or "Get error logs for service-name in the last 4 hours".
+See [README.md](README.md) for installation and usage instructions.
