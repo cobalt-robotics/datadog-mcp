@@ -1,6 +1,6 @@
 # Datadog MCP Server
 
-[![CircleCI](https://img.shields.io/circleci/build/github/hacctarr/datadog-mcp/main?style=flat&logo=circleci)](https://circleci.com/gh/hacctarr/datadog-mcp/tree/main)
+[![CI](https://github.com/hacctarr/datadog-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/hacctarr/datadog-mcp/actions/workflows/ci.yml)
 [![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://python.org)
 [![UV](https://img.shields.io/badge/uv-package%20manager-blue)](https://github.com/astral-sh/uv)
 [![Podman](https://img.shields.io/badge/podman-892CA0?style=flat&logo=podman&logoColor=white)](https://podman.io)
@@ -22,9 +22,15 @@ This MCP server enables Claude to:
 
 ## Installation
 
-### Claude Desktop (Recommended)
+### Claude Code (Simplest)
 
-Add to your Claude Desktop configuration (`~/Library/Application Support/Claude/claude_desktop_config.json`):
+```bash
+claude mcp add datadog-mcp -e DD_API_KEY=your-key -e DD_APP_KEY=your-app-key
+```
+
+### Claude Desktop
+
+Add to your config (`~/Library/Application Support/Claude/claude_desktop_config.json`):
 
 ```json
 {
@@ -41,14 +47,10 @@ Add to your Claude Desktop configuration (`~/Library/Application Support/Claude/
 }
 ```
 
-**Requirements:** [UV package manager](https://github.com/astral-sh/uv) (includes uvx)
-
 ### Command Line
 
 ```bash
-export DD_API_KEY="your-datadog-api-key"
-export DD_APP_KEY="your-datadog-application-key"
-uvx datadog-mcp
+DD_API_KEY=your-key DD_APP_KEY=your-app-key uvx datadog-mcp
 ```
 
 ### Development Setup
