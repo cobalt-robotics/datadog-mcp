@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.2.0] - 2026-01-19
+
+### Added
+- **Cookie-Based Authentication** - Alternative to API keys using browser session cookies
+  - Dynamic credential loading (update without restarting server)
+  - File-based storage (`~/.datadog_cookie`, `~/.datadog_csrf`)
+  - `save_cookie()` and `save_csrf_token()` helper functions
+- **CSRF Token Support** - Required for protected endpoints (traces, spans) with cookie auth
+- **Auth Tests** - 13 new tests covering cookie/CSRF authentication
+- **Configuration Documentation** - Added `.env.example` with all config options
+
+### Changed
+- `get_auth_headers()` now supports optional `include_csrf` parameter
+- `fetch_traces()` and `aggregate_traces()` include CSRF token when using cookie auth
+- Updated test fixtures and mock paths for better isolation
+
+### Technical
+- Cookie priority: `DD_COOKIE` env var > `~/.datadog_cookie` file
+- CSRF priority: `DD_CSRF_TOKEN` env var > `~/.datadog_csrf` file
+- Credentials read fresh on each API call (no restart needed)
+- File permissions set to 600 for security
+
 ## [v0.0.7] - 2025-11-26
 
 ### Added
@@ -196,10 +218,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Version History Summary
 
+- **v0.2.0**: Cookie-Based Authentication with CSRF Support
+- **v0.0.7**: PyPI Publishing & GitHub Actions
 - **v0.0.5**: Monitoring & Alerting Tools (Monitors & SLOs)
 - **v0.0.4**: CI/CD Pipeline & UVX Support
 - **v0.0.3**: Service Definitions Management
-- **v0.0.2**: Enhanced Metrics & Logging System  
+- **v0.0.2**: Enhanced Metrics & Logging System
 - **v0.0.1**: Initial Release with Core MCP Server, Docker Support
 
 ## Migration Notes
