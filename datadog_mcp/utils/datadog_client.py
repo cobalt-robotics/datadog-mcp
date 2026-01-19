@@ -24,23 +24,188 @@ from datadog_api_client.v2.model.logs_aggregate_sort import LogsAggregateSort
 
 logger = logging.getLogger(__name__)
 
-# Datadog API configuration
-DATADOG_API_URL = "https://api.datadoghq.com"
+# Cookie file location - can be overridden with DD_COOKIE_FILE env var
+DEFAULT_COOKIE_FILE = os.path.expanduser("~/.datadog_cookie")
+COOKIE_FILE_PATH = os.getenv("DD_COOKIE_FILE", DEFAULT_COOKIE_FILE)
+
+# CSRF token file location - required for some endpoints with cookie auth
+DEFAULT_CSRF_FILE = os.path.expanduser("~/.datadog_csrf")
+CSRF_FILE_PATH = os.getenv("DD_CSRF_FILE", DEFAULT_CSRF_FILE)
+
+# API key credentials (static, loaded once)
 DATADOG_API_KEY = os.getenv("DD_API_KEY")
 DATADOG_APP_KEY = os.getenv("DD_APP_KEY")
 
-# Datadog API configuration loaded from environment
 
-if not DATADOG_API_KEY or not DATADOG_APP_KEY:
-    logger.error("DD_API_KEY and DD_APP_KEY environment variables must be set")
-    raise ValueError("Datadog API credentials not configured")
+def get_cookie() -> Optional[str]:
+    """Get cookie from environment variable or file (read fresh each time).
+
+    This allows updating the cookie without restarting the server.
+    """
+    # First check environment variable
+    env_cookie = os.getenv("DD_COOKIE")
+    if env_cookie:
+        return env_cookie
+
+    # Then check cookie file
+    if os.path.isfile(COOKIE_FILE_PATH):
+        try:
+            with open(COOKIE_FILE_PATH, "r") as f:
+                cookie = f.read().strip()
+                if cookie:
+                    return cookie
+        except Exception as e:
+            logger.warning(f"Failed to read cookie file {COOKIE_FILE_PATH}: {e}")
+
+    return None
+
+
+def save_cookie(cookie: str) -> str:
+    """Save cookie to file for persistence.
+
+    Args:
+        cookie: The cookie string to save
+
+    Returns:
+        Path where cookie was saved
+    """
+    os.makedirs(os.path.dirname(COOKIE_FILE_PATH) or ".", exist_ok=True)
+    with open(COOKIE_FILE_PATH, "w") as f:
+        f.write(cookie.strip())
+    os.chmod(COOKIE_FILE_PATH, 0o600)  # Restrict permissions
+    logger.info(f"Cookie saved to {COOKIE_FILE_PATH}")
+    return COOKIE_FILE_PATH
+
+
+def get_csrf_token() -> Optional[str]:
+    """Get CSRF token from environment variable or file (read fresh each time).
+
+    Required for some Datadog endpoints when using cookie auth.
+    """
+    # First check environment variable
+    env_csrf = os.getenv("DD_CSRF_TOKEN")
+    if env_csrf:
+        return env_csrf
+
+    # Then check CSRF file
+    if os.path.isfile(CSRF_FILE_PATH):
+        try:
+            with open(CSRF_FILE_PATH, "r") as f:
+                csrf = f.read().strip()
+                if csrf:
+                    return csrf
+        except Exception as e:
+            logger.warning(f"Failed to read CSRF file {CSRF_FILE_PATH}: {e}")
+
+    return None
+
+
+def save_csrf_token(csrf_token: str) -> str:
+    """Save CSRF token to file for persistence.
+
+    Args:
+        csrf_token: The CSRF token to save
+
+    Returns:
+        Path where token was saved
+    """
+    os.makedirs(os.path.dirname(CSRF_FILE_PATH) or ".", exist_ok=True)
+    with open(CSRF_FILE_PATH, "w") as f:
+        f.write(csrf_token.strip())
+    os.chmod(CSRF_FILE_PATH, 0o600)  # Restrict permissions
+    logger.info(f"CSRF token saved to {CSRF_FILE_PATH}")
+    return CSRF_FILE_PATH
+
+
+def get_auth_mode() -> tuple[bool, str]:
+    """Determine authentication mode and API URL dynamically.
+
+    Returns:
+        Tuple of (use_cookie_auth, api_url)
+    """
+    cookie = get_cookie()
+    if cookie:
+        return True, "https://app.datadoghq.com"
+    else:
+        return False, "https://api.datadoghq.com"
+
+
+def get_api_url() -> str:
+    """Get the appropriate Datadog API URL based on current auth mode."""
+    _, url = get_auth_mode()
+    return url
+
+
+# For backwards compatibility - but prefer get_api_url() for dynamic behavior
+DATADOG_API_URL = "https://api.datadoghq.com"  # Default, overridden dynamically
+
+
+# Validate that at least one auth method is available at startup
+# (but allow cookie to be added later via file)
+_initial_cookie = get_cookie()
+if not _initial_cookie and (not DATADOG_API_KEY or not DATADOG_APP_KEY):
+    logger.warning(
+        "No credentials configured. Set DD_COOKIE env var, "
+        f"create {COOKIE_FILE_PATH}, or set DD_API_KEY and DD_APP_KEY."
+    )
+
+
+def get_auth_headers(include_csrf: bool = False) -> Dict[str, str]:
+    """Get authentication headers based on auth mode (read fresh each call).
+
+    Priority: Cookie (if available) > API keys
+    This allows dynamic cookie updates without restart while still supporting API keys.
+
+    Args:
+        include_csrf: If True and using cookie auth, include x-csrf-token header.
+                     Required for some endpoints like traces/spans.
+    """
+    cookie = get_cookie()
+    if cookie:
+        headers = {
+            "Content-Type": "application/json",
+            "Cookie": cookie,
+        }
+        if include_csrf:
+            csrf_token = get_csrf_token()
+            if csrf_token:
+                headers["x-csrf-token"] = csrf_token
+            else:
+                logger.warning("CSRF token requested but not available. Some endpoints may fail.")
+        return headers
+    elif DATADOG_API_KEY and DATADOG_APP_KEY:
+        return {
+            "Content-Type": "application/json",
+            "DD-API-KEY": DATADOG_API_KEY,
+            "DD-APPLICATION-KEY": DATADOG_APP_KEY,
+        }
+    else:
+        raise ValueError(
+            "No Datadog credentials available. Set DD_COOKIE env var, "
+            f"create {COOKIE_FILE_PATH}, or set DD_API_KEY and DD_APP_KEY."
+        )
 
 
 def get_datadog_configuration() -> Configuration:
-    """Get Datadog API configuration."""
+    """Get Datadog API configuration for SDK-based calls.
+
+    Note: The SDK doesn't support cookie auth. When using cookies,
+    prefer the httpx-based functions which use get_auth_headers() directly.
+    """
+    use_cookie, api_url = get_auth_mode()
     configuration = Configuration()
-    configuration.api_key["apiKeyAuth"] = DATADOG_API_KEY
-    configuration.api_key["appKeyAuth"] = DATADOG_APP_KEY
+
+    if use_cookie:
+        # SDK doesn't support cookie auth well, but set the host
+        configuration.host = api_url
+        logger.warning("SDK-based call with cookie auth may not work. Consider using httpx-based functions.")
+    else:
+        if DATADOG_API_KEY and DATADOG_APP_KEY:
+            configuration.api_key["apiKeyAuth"] = DATADOG_API_KEY
+            configuration.api_key["appKeyAuth"] = DATADOG_APP_KEY
+        else:
+            raise ValueError("API key authentication requires DD_API_KEY and DD_APP_KEY")
+
     return configuration
 
 
@@ -52,13 +217,9 @@ async def fetch_ci_pipelines(
     cursor: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Fetch CI pipelines from Datadog API."""
-    url = f"{DATADOG_API_URL}/api/v2/ci/pipelines/events/search"
+    url = f"{get_api_url()}/api/v2/ci/pipelines/events/search"
     
-    headers = {
-        "Content-Type": "application/json",
-        "DD-API-KEY": DATADOG_API_KEY,
-        "DD-APPLICATION-KEY": DATADOG_APP_KEY,
-    }
+    headers = get_auth_headers()
     
     # Build query filter
     query_parts = []
@@ -259,13 +420,9 @@ async def fetch_teams(
     page_number: int = 0,
 ) -> Dict[str, Any]:
     """Fetch teams from Datadog API."""
-    url = f"{DATADOG_API_URL}/api/v2/team"
+    url = f"{get_api_url()}/api/v2/team"
     
-    headers = {
-        "Content-Type": "application/json",
-        "DD-API-KEY": DATADOG_API_KEY,
-        "DD-APPLICATION-KEY": DATADOG_APP_KEY,
-    }
+    headers = get_auth_headers()
     
     # Add pagination parameters
     params = {
@@ -288,13 +445,9 @@ async def fetch_teams(
 
 async def fetch_team_memberships(team_id: str) -> List[Dict[str, Any]]:
     """Fetch team memberships from Datadog API."""
-    url = f"{DATADOG_API_URL}/api/v2/team/{team_id}/memberships"
+    url = f"{get_api_url()}/api/v2/team/{team_id}/memberships"
     
-    headers = {
-        "Content-Type": "application/json",
-        "DD-API-KEY": DATADOG_API_KEY,
-        "DD-APPLICATION-KEY": DATADOG_APP_KEY,
-    }
+    headers = get_auth_headers()
     
     async with httpx.AsyncClient() as client:
         try:
@@ -330,10 +483,7 @@ async def fetch_metrics(
                   Do NOT use for gauge metrics (e.g., cpu.percent, memory.usage).
     """
     
-    headers = {
-        "DD-API-KEY": DATADOG_API_KEY,
-        "DD-APPLICATION-KEY": DATADOG_APP_KEY,
-    }
+    headers = get_auth_headers()
     
     # Build metric query
     query_parts = [f"{aggregation}:{metric_name}"]
@@ -392,7 +542,7 @@ async def fetch_metrics(
         "to": to_timestamp,
     }
     
-    url = f"{DATADOG_API_URL}/api/v1/query"
+    url = f"{get_api_url()}/api/v1/query"
     
     async with httpx.AsyncClient() as client:
         try:
@@ -417,13 +567,10 @@ async def fetch_metrics_list(
 ) -> Dict[str, Any]:
     """Fetch list of all available metrics from Datadog API."""
     
-    headers = {
-        "DD-API-KEY": DATADOG_API_KEY,
-        "DD-APPLICATION-KEY": DATADOG_APP_KEY,
-    }
+    headers = get_auth_headers()
     
     # Use the v2 metrics endpoint to list all metrics
-    url = f"{DATADOG_API_URL}/api/v2/metrics"
+    url = f"{get_api_url()}/api/v2/metrics"
     
     # Build query parameters
     params = {
@@ -463,16 +610,13 @@ async def fetch_metric_available_fields(
     This ensures we find both indexed infrastructure tags AND custom application tags.
     """
 
-    headers = {
-        "DD-API-KEY": DATADOG_API_KEY,
-        "DD-APPLICATION-KEY": DATADOG_APP_KEY,
-    }
+    headers = get_auth_headers()
 
     available_fields = set()
 
     # Method 1: Try the metadata endpoint first (fast)
     try:
-        url = f"{DATADOG_API_URL}/api/v2/metrics/{metric_name}/all-tags"
+        url = f"{get_api_url()}/api/v2/metrics/{metric_name}/all-tags"
         async with httpx.AsyncClient() as client:
             response = await client.get(url, headers=headers)
             response.raise_for_status()
@@ -506,7 +650,7 @@ async def fetch_metric_available_fields(
     seconds_back = time_deltas.get(time_range, 604800)  # Default to 7 days for better coverage
     from_timestamp = to_timestamp - seconds_back
 
-    url = f"{DATADOG_API_URL}/api/v1/query"
+    url = f"{get_api_url()}/api/v1/query"
 
     async with httpx.AsyncClient() as client:
         for tag_name in common_custom_tags:
@@ -546,10 +690,7 @@ async def fetch_metric_field_values(
     which is more reliable than the metadata endpoint for custom tags.
     """
 
-    headers = {
-        "DD-API-KEY": DATADOG_API_KEY,
-        "DD-APPLICATION-KEY": DATADOG_APP_KEY,
-    }
+    headers = get_auth_headers()
 
     # Query the actual metric data grouped by the field to get all unique values
     # This is more reliable than /all-tags for custom application tags
@@ -566,7 +707,7 @@ async def fetch_metric_field_values(
         "to": to_timestamp,
     }
 
-    url = f"{DATADOG_API_URL}/api/v1/query"
+    url = f"{get_api_url()}/api/v1/query"
 
     async with httpx.AsyncClient() as client:
         try:
@@ -607,13 +748,10 @@ async def fetch_service_definitions(
 ) -> Dict[str, Any]:
     """Fetch service definitions from Datadog API."""
     
-    headers = {
-        "DD-API-KEY": DATADOG_API_KEY,
-        "DD-APPLICATION-KEY": DATADOG_APP_KEY,
-    }
+    headers = get_auth_headers()
     
     # Use the service definitions endpoint
-    url = f"{DATADOG_API_URL}/api/v2/services/definitions"
+    url = f"{get_api_url()}/api/v2/services/definitions"
     
     # Build query parameters
     params = {
@@ -644,13 +782,10 @@ async def fetch_service_definition(
 ) -> Dict[str, Any]:
     """Fetch a single service definition from Datadog API."""
     
-    headers = {
-        "DD-API-KEY": DATADOG_API_KEY,
-        "DD-APPLICATION-KEY": DATADOG_APP_KEY,
-    }
+    headers = get_auth_headers()
     
     # Use the specific service definition endpoint
-    url = f"{DATADOG_API_URL}/api/v2/services/definitions/{service_name}"
+    url = f"{get_api_url()}/api/v2/services/definitions/{service_name}"
     
     # Build query parameters
     params = {
@@ -682,13 +817,10 @@ async def fetch_monitors(
 ) -> List[Dict[str, Any]]:
     """Fetch monitors from Datadog API."""
     
-    headers = {
-        "DD-API-KEY": DATADOG_API_KEY,
-        "DD-APPLICATION-KEY": DATADOG_APP_KEY,
-    }
+    headers = get_auth_headers()
     
     # Use the v1 monitors endpoint
-    url = f"{DATADOG_API_URL}/api/v1/monitor"
+    url = f"{get_api_url()}/api/v1/monitor"
     
     # Build query parameters
     params = {}
@@ -725,13 +857,9 @@ async def fetch_slos(
     offset: int = 0,
 ) -> List[Dict[str, Any]]:
     """Fetch SLOs from Datadog API."""
-    url = f"{DATADOG_API_URL}/api/v1/slo"
+    url = f"{get_api_url()}/api/v1/slo"
     
-    headers = {
-        "Content-Type": "application/json",
-        "DD-API-KEY": DATADOG_API_KEY,
-        "DD-APPLICATION-KEY": DATADOG_APP_KEY,
-    }
+    headers = get_auth_headers()
     
     params = {
         "limit": limit,
@@ -760,13 +888,9 @@ async def fetch_slos(
 
 async def fetch_slo_details(slo_id: str) -> Dict[str, Any]:
     """Fetch detailed information for a specific SLO."""
-    url = f"{DATADOG_API_URL}/api/v1/slo/{slo_id}"
+    url = f"{get_api_url()}/api/v1/slo/{slo_id}"
     
-    headers = {
-        "Content-Type": "application/json",
-        "DD-API-KEY": DATADOG_API_KEY,
-        "DD-APPLICATION-KEY": DATADOG_APP_KEY,
-    }
+    headers = get_auth_headers()
     
     async with httpx.AsyncClient() as client:
         try:
@@ -790,13 +914,9 @@ async def fetch_slo_history(
     target: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Fetch SLO history data."""
-    url = f"{DATADOG_API_URL}/api/v1/slo/{slo_id}/history"
+    url = f"{get_api_url()}/api/v1/slo/{slo_id}/history"
 
-    headers = {
-        "Content-Type": "application/json",
-        "DD-API-KEY": DATADOG_API_KEY,
-        "DD-APPLICATION-KEY": DATADOG_APP_KEY,
-    }
+    headers = get_auth_headers()
 
     params = {
         "from_ts": from_ts,
@@ -840,13 +960,10 @@ async def fetch_traces(
     Returns:
         Dict containing traces data and pagination info
     """
-    url = f"{DATADOG_API_URL}/api/v2/spans/events/search"
+    url = f"{get_api_url()}/api/v2/spans/events/search"
 
-    headers = {
-        "Content-Type": "application/json",
-        "DD-API-KEY": DATADOG_API_KEY,
-        "DD-APPLICATION-KEY": DATADOG_APP_KEY,
-    }
+    # Traces API requires CSRF token when using cookie auth
+    headers = get_auth_headers(include_csrf=True)
 
     # Build query filter
     query_parts = []
@@ -884,8 +1001,13 @@ async def fetch_traces(
                 "sort": "timestamp",  # Most recent first (use "-timestamp" for oldest first)
             },
             "type": "search_request",
-        }
+        },
     }
+
+    # Add CSRF token to body if using cookie auth
+    csrf_token = get_csrf_token()
+    if csrf_token and get_cookie():
+        payload["_authentication_token"] = csrf_token
 
     # Add cursor for pagination if provided
     if cursor:
@@ -944,13 +1066,10 @@ async def aggregate_traces(
     Returns:
         Dict containing aggregated trace counts grouped by specified fields
     """
-    url = f"{DATADOG_API_URL}/api/v2/spans/analytics/aggregate"
+    url = f"{get_api_url()}/api/v2/spans/analytics/aggregate"
 
-    headers = {
-        "Content-Type": "application/json",
-        "DD-API-KEY": DATADOG_API_KEY,
-        "DD-APPLICATION-KEY": DATADOG_APP_KEY,
-    }
+    # Traces API requires CSRF token when using cookie auth
+    headers = get_auth_headers(include_csrf=True)
 
     # Build query filter
     query_parts = []
@@ -987,8 +1106,13 @@ async def aggregate_traces(
                 ],
             },
             "type": "aggregate_request",
-        }
+        },
     }
+
+    # Add CSRF token to body if using cookie auth
+    csrf_token = get_csrf_token()
+    if csrf_token and get_cookie():
+        payload["_authentication_token"] = csrf_token
 
     # Add group by if specified
     if group_by:

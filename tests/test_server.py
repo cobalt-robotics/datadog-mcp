@@ -158,17 +158,31 @@ class TestServerIntegration:
 
 class TestEnvironmentConfiguration:
     """Test environment configuration requirements"""
-    
-    def test_datadog_credentials_required(self):
-        """Test that missing Datadog credentials are handled"""
-        # Test with missing credentials
+
+    def test_datadog_credentials_missing_logs_warning(self):
+        """Test that missing Datadog credentials logs a warning (allows cookie to be added later)"""
+        import importlib
+        import logging
+
         with patch.dict(os.environ, {}, clear=True):
-            with pytest.raises(ValueError, match="Datadog API credentials not configured"):
-                # Re-import to trigger credential check
-                import importlib
-                from datadog_mcp.utils import datadog_client
-                importlib.reload(datadog_client)
-    
+            # Also need to ensure no cookie file exists
+            with patch('datadog_mcp.utils.datadog_client.os.path.isfile', return_value=False):
+                with patch.object(logging.getLogger('datadog_mcp.utils.datadog_client'), 'warning') as mock_warn:
+                    from datadog_mcp.utils import datadog_client
+                    importlib.reload(datadog_client)
+                    # Should log warning, not raise error
+                    mock_warn.assert_called()
+
+    def test_get_auth_headers_raises_when_no_credentials(self):
+        """Test that get_auth_headers raises ValueError when no credentials available"""
+        from datadog_mcp.utils import datadog_client
+
+        with patch.object(datadog_client, 'get_cookie', return_value=None):
+            with patch.object(datadog_client, 'DATADOG_API_KEY', None):
+                with patch.object(datadog_client, 'DATADOG_APP_KEY', None):
+                    with pytest.raises(ValueError, match="No Datadog credentials available"):
+                        datadog_client.get_auth_headers()
+
     def test_datadog_credentials_present(self):
         """Test that valid credentials don't raise errors"""
         with patch.dict(os.environ, {"DD_API_KEY": "test_key", "DD_APP_KEY": "test_app_key"}):
@@ -176,7 +190,7 @@ class TestEnvironmentConfiguration:
             import importlib
             from datadog_mcp.utils import datadog_client
             importlib.reload(datadog_client)
-            
+
             # Verify credentials are loaded
             assert datadog_client.DATADOG_API_KEY == "test_key"
             assert datadog_client.DATADOG_APP_KEY == "test_app_key"

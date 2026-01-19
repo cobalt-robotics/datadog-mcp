@@ -108,3 +108,10 @@ dmypy.json
 
 # Claude Code local settings (may contain secrets)
 .claude/
+
+# Datadog cookie and CSRF files (contain sensitive auth tokens)
+.dd_cookie
+.datadog_cookie
+.datadog_csrf
+~/.datadog_cookie
+~/.datadog_csrf
