@@ -2,10 +2,14 @@
 Integration tests that verify the overall system works without requiring real API calls
 """
 
-import pytest
+import importlib
 import os
+
+import pytest
 from unittest.mock import patch, MagicMock
+
 from datadog_mcp.server import TOOLS, handle_list_tools, handle_call_tool
+from datadog_mcp.utils import datadog_client
 from mcp.types import Tool, TextContent
 
 
@@ -97,14 +101,13 @@ class TestEnvironmentHandling:
     """Test environment configuration handling"""
     
     def test_missing_credentials_handling(self):
-        """Test that missing credentials are properly handled"""
-        # Clear environment
+        """Test that missing credentials don't crash - just log warning"""
+        # Clear environment - module should load without raising
         with patch.dict(os.environ, {}, clear=True):
-            with pytest.raises(ValueError, match="Datadog API credentials not configured"):
-                # Re-import to trigger credential check
-                import importlib
-                from datadog_mcp.utils import datadog_client
-                importlib.reload(datadog_client)
+            # Should not raise - just logs a warning
+            importlib.reload(datadog_client)
+            # Verify module loaded successfully
+            assert hasattr(datadog_client, 'get_auth_headers')
     
     def test_valid_credentials_accepted(self):
         """Test that valid credentials work"""
