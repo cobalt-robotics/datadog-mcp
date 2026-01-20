@@ -56,8 +56,6 @@ Requires [uvx](https://github.com/astral-sh/uv). Alternatively use `pipx run dat
 | `get_pipeline_fingerprints` | Extract pipeline fingerprints |
 | `get_teams` | List teams and members |
 
-> **Note:** `get_traces` and `aggregate_traces` require [cookie authentication](#cookie-authentication) with CSRF token.
-
 ## Examples
 
 ```
@@ -69,38 +67,50 @@ Requires [uvx](https://github.com/astral-sh/uv). Alternatively use `pipx run dat
 
 ## Authentication
 
-Two authentication methods are supported:
+Two authentication methods are supported. Use whichever is easier for your setup.
 
-### API Keys (Recommended for most tools)
+| Method | Variables |
+|--------|-----------|
+| **API Keys** | `DD_API_KEY` + `DD_APP_KEY` |
+| **Cookie + CSRF** | `DD_COOKIE` + `DD_CSRF_TOKEN` |
+
+### Option 1: API Keys
 
 1. Go to [Datadog Organization Settings](https://app.datadoghq.com/organization-settings/)
 2. **API Keys** → Create/copy key → `DD_API_KEY`
 3. **Application Keys** → Create/copy key → `DD_APP_KEY`
 
-### Cookie Authentication
+```bash
+export DD_API_KEY="your-api-key"
+export DD_APP_KEY="your-app-key"
+```
 
-Required for traces/spans API. Use browser cookies from an authenticated Datadog session.
+### Option 2: Cookie + CSRF (v0.2.0+)
 
-**Setup:**
-1. Log into Datadog in your browser
-2. Open DevTools → Network tab → find any request to `app.datadoghq.com`
-3. Copy the `Cookie` header value (needs `dogweb` and `dogwebu` cookies)
-4. Copy the `x-csrf-token` header value
+Use browser session cookies instead of API keys.
 
-**Configure via environment variables:**
+**To get your cookie and CSRF token:**
+1. Log into [app.datadoghq.com](https://app.datadoghq.com) in your browser
+2. Open DevTools (F12) → Network tab
+3. Find any request to `app.datadoghq.com`
+4. From the request headers, copy:
+   - `Cookie` header → look for `dogweb=...` and `dogwebu=...` values
+   - `x-csrf-token` header value
+
+**Via environment variables:**
 ```bash
 export DD_COOKIE="dogweb=abc123; dogwebu=xyz789"
 export DD_CSRF_TOKEN="your-csrf-token"
 ```
 
-**Or via files** (useful for dynamic updates without restart):
+**Via files** (can be updated without restarting the server):
 ```bash
 echo "dogweb=abc123; dogwebu=xyz789" > ~/.datadog_cookie
 echo "your-csrf-token" > ~/.datadog_csrf
 chmod 600 ~/.datadog_cookie ~/.datadog_csrf
 ```
 
-**Priority:** Environment variables take precedence over files. Cookie auth takes precedence over API keys when both are configured.
+**Priority:** Cookie auth is used when available, otherwise falls back to API keys. Environment variables take precedence over files.
 
 ## Development
 
