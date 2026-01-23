@@ -8,19 +8,6 @@ import os
 from typing import Any, Dict, List, Optional
 
 import httpx
-from datadog_api_client import ApiClient, Configuration
-from datadog_api_client.v2.api.logs_api import LogsApi
-from datadog_api_client.v2.model.logs_list_request import LogsListRequest
-from datadog_api_client.v2.model.logs_list_request_page import LogsListRequestPage
-from datadog_api_client.v2.model.logs_query_filter import LogsQueryFilter
-from datadog_api_client.v2.model.logs_query_options import LogsQueryOptions
-from datadog_api_client.v2.model.logs_sort import LogsSort
-from datadog_api_client.v2.model.logs_aggregate_request import LogsAggregateRequest
-from datadog_api_client.v2.model.logs_aggregation_function import LogsAggregationFunction
-from datadog_api_client.v2.model.logs_compute import LogsCompute
-from datadog_api_client.v2.model.logs_compute_type import LogsComputeType
-from datadog_api_client.v2.model.logs_group_by import LogsGroupBy
-from datadog_api_client.v2.model.logs_aggregate_sort import LogsAggregateSort
 
 logger = logging.getLogger(__name__)
 
@@ -186,29 +173,6 @@ def get_auth_headers(include_csrf: bool = False) -> Dict[str, str]:
         )
 
 
-def get_datadog_configuration() -> Configuration:
-    """Get Datadog API configuration for SDK-based calls.
-
-    Note: The SDK doesn't support cookie auth. When using cookies,
-    prefer the httpx-based functions which use get_auth_headers() directly.
-    """
-    use_cookie, api_url = get_auth_mode()
-    configuration = Configuration()
-
-    if use_cookie:
-        # SDK doesn't support cookie auth well, but set the host
-        configuration.host = api_url
-        logger.warning("SDK-based call with cookie auth may not work. Consider using httpx-based functions.")
-    else:
-        if DATADOG_API_KEY and DATADOG_APP_KEY:
-            configuration.api_key["apiKeyAuth"] = DATADOG_API_KEY
-            configuration.api_key["appKeyAuth"] = DATADOG_APP_KEY
-        else:
-            raise ValueError("API key authentication requires DD_API_KEY and DD_APP_KEY")
-
-    return configuration
-
-
 async def fetch_ci_pipelines(
     repository: Optional[str] = None,
     pipeline_name: Optional[str] = None,
@@ -262,57 +226,191 @@ async def fetch_logs(
     limit: int = 50,
     cursor: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Fetch logs from Datadog API with flexible filtering using SDK."""
-    try:
-        # Build query filter
-        query_parts = []
-        
-        # Add filters from the filters dictionary
-        if filters:
-            for key, value in filters.items():
-                query_parts.append(f"{key}:{value}")
-        
-        # Add free-text query
-        if query:
-            query_parts.append(query)
-        
-        combined_query = " AND ".join(query_parts) if query_parts else "*"
-        
-        # Create request body
-        body = LogsListRequest(
-            filter=LogsQueryFilter(
-                query=combined_query,
-                _from=f"now-{time_range}",
-                to="now",
-            ),
-            options=LogsQueryOptions(
-                timezone="GMT",
-            ),
-            page=LogsListRequestPage(
-                limit=limit,
-                cursor=cursor,
-            ),
-            sort=LogsSort.TIMESTAMP_DESCENDING,  # Most recent first
-        )
-        
-        configuration = get_datadog_configuration()
-        with ApiClient(configuration) as api_client:
-            api_instance = LogsApi(api_client)
-            response = api_instance.list_logs(body=body)
-            
-            # Convert to dict format for backward compatibility
-            result = {
-                "data": [log.to_dict() for log in response.data] if response.data else [],
-                "meta": response.meta.to_dict() if response.meta else {},
-                # Note: LogsListResponse doesn't have a 'links' attribute in the current API version
-                # Pagination is handled via cursor in meta.page.after
-            }
+    """Fetch logs from Datadog API with flexible filtering using httpx.
 
-            return result
-    
-    except Exception as e:
-        logger.error(f"Error fetching logs: {e}")
-        raise
+    Uses different endpoints based on auth mode:
+    - Cookie auth: Internal UI endpoint /api/v1/logs-analytics/list (supports cookies)
+    - API key auth: Public endpoint /api/v2/logs/events/search
+    """
+    import asyncio
+
+    cookie = get_cookie()
+
+    # Build query filter
+    query_parts = []
+    if filters:
+        for key, value in filters.items():
+            query_parts.append(f"{key}:{value}")
+    if query:
+        query_parts.append(query)
+    combined_query = " AND ".join(query_parts) if query_parts else "*"
+
+    # Convert time_range to seconds for internal API
+    time_seconds_map = {
+        "1h": 3600,
+        "4h": 14400,
+        "8h": 28800,
+        "1d": 86400,
+        "7d": 604800,
+        "14d": 1209600,
+        "30d": 2592000,
+    }
+    time_seconds = time_seconds_map.get(time_range, 3600)
+
+    if cookie:
+        # Use internal UI endpoint for cookie auth
+        url = f"{get_api_url()}/api/v1/logs-analytics/list"
+        headers = get_auth_headers(include_csrf=True)
+        # Add origin header required by internal endpoint
+        headers["origin"] = "https://app.datadoghq.com"
+
+        csrf_token = get_csrf_token()
+
+        # Build internal API payload format
+        payload = {
+            "list": {
+                "columns": [],
+                "sort": {
+                    "field": {
+                        "path": "@timestamp",
+                        "order": "desc"
+                    }
+                },
+                "limit": limit,
+                "time": {
+                    "from": f"now-{time_seconds}s",
+                    "to": "now"
+                },
+                "search": {
+                    "query": combined_query
+                },
+                "includeEvents": True,
+                "computeCount": False,
+                "indexes": ["*"],
+                "executionInfo": {},
+                "paging": {}
+            }
+        }
+
+        # Add cursor for pagination
+        if cursor:
+            payload["list"]["paging"]["after"] = cursor
+
+        # Add CSRF token to body
+        if csrf_token:
+            payload["_authentication_token"] = csrf_token
+
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.post(url, headers=headers, json=payload, timeout=30.0)
+                response.raise_for_status()
+                result = response.json()
+
+                # Internal API uses async polling pattern - poll until status is "done"
+                max_polls = 30  # Maximum number of poll attempts
+                poll_interval = 0.5  # Seconds between polls
+
+                while result.get("status") == "running" and max_polls > 0:
+                    await asyncio.sleep(poll_interval)
+                    # Re-post the same request to get updated status
+                    response = await client.post(url, headers=headers, json=payload, timeout=30.0)
+                    response.raise_for_status()
+                    result = response.json()
+                    max_polls -= 1
+
+                if result.get("status") == "running":
+                    logger.warning("Log query timed out waiting for results")
+
+                # Extract events from the result
+                events = result.get("result", {}).get("events", [])
+
+                # Transform events to match public API format
+                # Internal API structure: event.event contains the log data
+                normalized_data = []
+                for evt in events:
+                    event_data = evt.get("event", {})
+                    custom = event_data.get("custom", {})
+
+                    # Extract status/level from custom fields or tags
+                    status = custom.get("level", "").lower()
+                    if not status:
+                        # Try to extract from tags
+                        for tag in event_data.get("tags", []):
+                            if tag.startswith("status:"):
+                                status = tag.split(":", 1)[1]
+                                break
+
+                    normalized_data.append({
+                        "id": evt.get("id", ""),
+                        "attributes": {
+                            "timestamp": custom.get("timestamp") or event_data.get("discovery_timestamp"),
+                            "message": event_data.get("message", ""),
+                            "service": event_data.get("service"),
+                            "status": status,
+                            "host": event_data.get("host"),
+                            "tags": event_data.get("tags", []),
+                            "attributes": event_data,
+                        }
+                    })
+
+                # Get pagination cursor from response
+                paging = result.get("result", {}).get("paging", {})
+                next_cursor = paging.get("after")
+
+                return {
+                    "data": normalized_data,
+                    "meta": {
+                        "page": {
+                            "after": next_cursor
+                        }
+                    }
+                }
+            except httpx.HTTPError as e:
+                logger.error(f"HTTP error fetching logs: {e}")
+                if hasattr(e, 'response') and e.response is not None:
+                    logger.error(f"Response status: {e.response.status_code}")
+                    logger.error(f"Response body: {e.response.text}")
+                raise
+            except Exception as e:
+                logger.error(f"Error fetching logs: {e}")
+                raise
+    else:
+        # Use public API endpoint for API key auth
+        url = f"{get_api_url()}/api/v2/logs/events/search"
+        headers = get_auth_headers()
+
+        payload = {
+            "filter": {
+                "query": combined_query,
+                "from": f"now-{time_range}",
+                "to": "now",
+            },
+            "options": {
+                "timezone": "GMT",
+            },
+            "page": {
+                "limit": limit,
+            },
+            "sort": "-timestamp",
+        }
+
+        if cursor:
+            payload["page"]["cursor"] = cursor
+
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.post(url, headers=headers, json=payload, timeout=30.0)
+                response.raise_for_status()
+                return response.json()
+            except httpx.HTTPError as e:
+                logger.error(f"HTTP error fetching logs: {e}")
+                if hasattr(e, 'response') and e.response is not None:
+                    logger.error(f"Response status: {e.response.status_code}")
+                    logger.error(f"Response body: {e.response.text}")
+                raise
+            except Exception as e:
+                logger.error(f"Error fetching logs: {e}")
+                raise
 
 
 async def fetch_logs_filter_values(
@@ -323,69 +421,144 @@ async def fetch_logs_filter_values(
 ) -> Dict[str, Any]:
     """
     Fetch possible values for a specific log field to understand filtering options.
-    
+
     Args:
         field_name: The field to get possible values for (e.g., 'service', 'env', 'status', 'host')
         time_range: Time range to look back (default: 1h)
         query: Optional query to filter logs before aggregation
         limit: Maximum number of values to return
-        
+
     Returns:
         Dict containing the field values and their counts
     """
-    try:
-        # Build base query
-        base_query = query if query else "*"
-        
-        # Create aggregation request to group by the specified field
-        body = LogsAggregateRequest(
-            compute=[
-                LogsCompute(
-                    aggregation=LogsAggregationFunction.COUNT,
-                    type=LogsComputeType.TOTAL,
-                ),
-            ],
-            filter=LogsQueryFilter(
-                query=base_query,
-                _from=f"now-{time_range}",
-                to="now",
-            ),
-            group_by=[
-                LogsGroupBy(
-                    facet=field_name,
-                    limit=limit,
-                ),
-            ],
+    cookie = get_cookie()
+
+    if cookie:
+        # Cookie auth: Use logs endpoint and extract unique values from results
+        # The aggregation API doesn't support cookie auth, so we derive values from logs
+        filters = {}
+        if query and ":" in query:
+            # Try to parse simple key:value queries as filters
+            pass  # Keep as free-text query
+
+        logs_result = await fetch_logs(
+            time_range=time_range,
+            filters=filters,
+            query=query,
+            limit=500,  # Fetch more logs to get better coverage of values
         )
-        
-        configuration = get_datadog_configuration()
-        with ApiClient(configuration) as api_client:
-            api_instance = LogsApi(api_client)
-            response = api_instance.aggregate_logs(body=body)
-            
+
+        # Extract unique values from log attributes
+        value_counts: Dict[str, int] = {}
+        for log in logs_result.get("data", []):
+            attrs = log.get("attributes", {})
+            event_data = attrs.get("attributes", {})  # Nested attributes contains raw event
+
+            # Map field names to where they appear in the data
+            value = None
+            if field_name == "service":
+                value = attrs.get("service") or event_data.get("service")
+            elif field_name == "host":
+                value = attrs.get("host") or event_data.get("host")
+            elif field_name == "status":
+                value = attrs.get("status") or event_data.get("custom", {}).get("level", "").lower()
+            elif field_name == "env":
+                # Extract from tags
+                for tag in (attrs.get("tags") or event_data.get("tags", [])):
+                    if tag.startswith("env:"):
+                        value = tag.split(":", 1)[1]
+                        break
+            elif field_name == "source":
+                value = event_data.get("source")
+            else:
+                # Try to find in tags or custom fields
+                for tag in (attrs.get("tags") or event_data.get("tags", [])):
+                    if tag.startswith(f"{field_name}:"):
+                        value = tag.split(":", 1)[1]
+                        break
+                if not value:
+                    value = event_data.get("custom", {}).get(field_name)
+
+            if value:
+                value_counts[value] = value_counts.get(value, 0) + 1
+
+        # Convert to list format and sort by count
+        field_values = [
+            {"value": v, "count": c}
+            for v, c in value_counts.items()
+        ]
+        field_values.sort(key=lambda x: x["count"], reverse=True)
+
+        return {
+            "field": field_name,
+            "time_range": time_range,
+            "values": field_values[:limit],
+            "total_values": len(field_values),
+        }
+
+    # API key auth: Use the aggregation endpoint
+    url = f"{get_api_url()}/api/v2/logs/analytics/aggregate"
+    headers = get_auth_headers()
+
+    # Build base query
+    base_query = query if query else "*"
+
+    # Build aggregation request payload
+    payload = {
+        "compute": [
+            {
+                "aggregation": "count",
+                "type": "total",
+            }
+        ],
+        "filter": {
+            "query": base_query,
+            "from": f"now-{time_range}",
+            "to": "now",
+        },
+        "group_by": [
+            {
+                "facet": field_name,
+                "limit": limit,
+            }
+        ],
+    }
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(url, headers=headers, json=payload)
+            response.raise_for_status()
+            data = response.json()
+
             # Extract field values from buckets
             field_values = []
-            if response.data and response.data.buckets:
-                for bucket in response.data.buckets:
-                    if bucket.by and field_name in bucket.by:
+            if "data" in data and "buckets" in data["data"]:
+                for bucket in data["data"]["buckets"]:
+                    if "by" in bucket and field_name in bucket["by"]:
                         field_values.append({
-                            "value": bucket.by[field_name],
-                            "count": bucket.computes.get("c0", 0) if bucket.computes else 0
+                            "value": bucket["by"][field_name],
+                            "count": bucket.get("computes", {}).get("c0", 0)
                         })
-            
+
             # Sort by count descending
             field_values.sort(key=lambda x: x["count"], reverse=True)
-            
+
             return {
                 "field": field_name,
                 "time_range": time_range,
                 "values": field_values,
                 "total_values": len(field_values),
             }
-    
-    except Exception as e:
-        logger.error(f"Error fetching filter values for field '{field_name}': {e}")
-        raise
+
+        except httpx.HTTPError as e:
+            logger.error(f"HTTP error fetching filter values for field '{field_name}': {e}")
+            if hasattr(e, 'response') and e.response is not None:
+                logger.error(f"Response status: {e.response.status_code}")
+                logger.error(f"Response body: {e.response.text}")
+            raise
+        except Exception as e:
+            logger.error(f"Error fetching filter values for field '{field_name}': {e}")
+            raise
 
 
 # Backward compatibility alias
