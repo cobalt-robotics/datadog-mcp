@@ -54,6 +54,47 @@ class TestLogsToolWorking:
             assert "error" in result.content[0].text.lower()
 
 
+    @pytest.mark.asyncio
+    async def test_logs_handler_with_numeric_timestamp(self, sample_request, sample_logs_data_with_numeric_timestamp, mock_env_credentials):
+        """Test logs handler with numeric timestamp values (regression test for 'int' object is not subscriptable bug)"""
+        sample_request.arguments = {
+            "query": "error",
+            "time_range": "1h",
+            "limit": 100,
+            "format": "table"
+        }
+
+        with patch('datadog_mcp.tools.get_logs.fetch_logs', new_callable=AsyncMock) as mock_fetch:
+            mock_fetch.return_value = sample_logs_data_with_numeric_timestamp
+
+            result = await get_logs.handle_call(sample_request)
+
+            # Should not raise 'int' object is not subscriptable
+            assert isinstance(result, CallToolResult)
+            assert result.isError is False
+            assert len(result.content) > 0
+            assert isinstance(result.content[0], TextContent)
+            # Verify the numeric timestamp was converted to string
+            assert "1737745200" in result.content[0].text
+
+    @pytest.mark.asyncio
+    async def test_logs_handler_text_format_with_numeric_values(self, sample_request, sample_logs_data_with_numeric_timestamp, mock_env_credentials):
+        """Test logs handler text format with numeric values"""
+        sample_request.arguments = {
+            "query": "error",
+            "format": "text"
+        }
+
+        with patch('datadog_mcp.tools.get_logs.fetch_logs', new_callable=AsyncMock) as mock_fetch:
+            mock_fetch.return_value = sample_logs_data_with_numeric_timestamp
+
+            result = await get_logs.handle_call(sample_request)
+
+            # Should not raise any errors with numeric values
+            assert isinstance(result, CallToolResult)
+            assert result.isError is False
+
+
 class TestTeamsToolWorking:
     """Working tests for teams functionality"""
     

@@ -27,11 +27,75 @@ def mock_httpx_client():
         mock_response = MagicMock()
         mock_response.json.return_value = {"data": []}
         mock_response.raise_for_status.return_value = None
-        
+
         mock_client.return_value.__aenter__.return_value.get.return_value = mock_response
         mock_client.return_value.__aenter__.return_value.post.return_value = mock_response
-        
+
         yield mock_client
+
+
+def create_httpx_mock(response_data):
+    """
+    Create a properly configured httpx.AsyncClient mock for async context manager usage.
+
+    This handles the async context manager protocol and async get/post methods correctly.
+
+    Usage:
+        with create_httpx_mock({"data": []}) as mock_client:
+            result = await some_function_using_httpx()
+    """
+    mock_client = patch('datadog_mcp.utils.datadog_client.httpx.AsyncClient')
+    mock = mock_client.start()
+
+    # Create mock response object (httpx response methods are sync)
+    mock_response = MagicMock()
+    mock_response.json.return_value = response_data
+    mock_response.raise_for_status.return_value = None
+    mock_response.status_code = 200
+    mock_response.text = str(response_data)
+
+    # Create mock client instance with async get/post methods
+    mock_instance = MagicMock()
+    mock_instance.get = AsyncMock(return_value=mock_response)
+    mock_instance.post = AsyncMock(return_value=mock_response)
+
+    # Configure async context manager
+    mock.__aenter__ = AsyncMock(return_value=mock_instance)
+    mock.__aexit__ = AsyncMock(return_value=None)
+    mock.return_value.__aenter__ = AsyncMock(return_value=mock_instance)
+    mock.return_value.__aexit__ = AsyncMock(return_value=None)
+
+    # Attach mock objects for test assertions
+    mock._mock_response = mock_response
+    mock._mock_instance = mock_instance
+    mock._patch = mock_client
+
+    return mock
+
+
+@pytest.fixture
+def httpx_mock_factory():
+    """
+    Factory fixture for creating httpx mocks with custom response data.
+
+    Usage:
+        def test_something(httpx_mock_factory):
+            mock = httpx_mock_factory({"data": [{"id": "1"}]})
+            result = await some_api_call()
+            mock._patch.stop()  # Clean up
+    """
+    mocks = []
+
+    def _create(response_data):
+        mock = create_httpx_mock(response_data)
+        mocks.append(mock)
+        return mock
+
+    yield _create
+
+    # Clean up all mocks
+    for mock in mocks:
+        mock._patch.stop()
 
 
 @pytest.fixture
@@ -65,6 +129,40 @@ def sample_logs_data():
                     "service": "test-service",
                     "status": "error",
                     "host": "test-host"
+                }
+            }
+        ],
+        "meta": {
+            "page": {
+                "after": None
+            }
+        }
+    }
+
+
+@pytest.fixture
+def sample_logs_data_with_numeric_timestamp():
+    """Sample logs data with numeric timestamps (regression test for int subscript bug)"""
+    return {
+        "data": [
+            {
+                "id": "log-1",
+                "attributes": {
+                    "timestamp": 1737745200,  # Unix timestamp as integer
+                    "message": "Test log with numeric timestamp",
+                    "service": "test-service",
+                    "status": "error",
+                    "host": "test-host"
+                }
+            },
+            {
+                "id": "log-2",
+                "attributes": {
+                    "timestamp": None,  # None timestamp
+                    "message": "Test log with None timestamp",
+                    "service": None,  # None service
+                    "status": 500,  # Numeric status code
+                    "host": None
                 }
             }
         ],

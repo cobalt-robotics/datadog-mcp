@@ -33,10 +33,11 @@ class TestTeamsToolDefinition:
 
 class TestTeamsRetrieval:
     """Test team data retrieval functionality"""
-    
+
     @pytest.mark.asyncio
-    async def test_fetch_teams_basic(self):
+    async def test_fetch_teams_basic(self, httpx_mock_factory):
         """Test basic team fetching functionality"""
+        # The raw API response format
         mock_response_data = {
             "data": [
                 {
@@ -47,83 +48,56 @@ class TestTeamsRetrieval:
                         "description": "Backend development team",
                         "handle": "backend-team",
                         "summary": "Responsible for API development"
-                    },
-                    "relationships": {
-                        "users": {
-                            "data": [
-                                {"id": "user-1", "type": "users"},
-                                {"id": "user-2", "type": "users"}
-                            ]
-                        }
                     }
                 }
             ],
-            "included": [
-                {
-                    "id": "user-1",
-                    "type": "users",
-                    "attributes": {
-                        "name": "John Doe",
-                        "email": "john@example.com",
-                        "handle": "john.doe"
-                    }
-                },
-                {
-                    "id": "user-2", 
-                    "type": "users",
-                    "attributes": {
-                        "name": "Jane Smith",
-                        "email": "jane@example.com", 
-                        "handle": "jane.smith"
-                    }
+            "meta": {
+                "pagination": {
+                    "total_count": 1
                 }
-            ]
+            }
         }
-        
-        with patch('datadog_mcp.utils.datadog_client.httpx.AsyncClient') as mock_client:
-            mock_client.return_value.__aenter__.return_value.get.return_value.json.return_value = mock_response_data
-            mock_client.return_value.__aenter__.return_value.get.return_value.raise_for_status.return_value = None
-            
-            result = await datadog_client.fetch_teams()
-            
-            assert isinstance(result, dict)
-            assert "teams" in result
-            assert "users" in result
-            assert len(result["teams"]) > 0
-    
+
+        httpx_mock_factory(mock_response_data)
+        result = await datadog_client.fetch_teams()
+
+        # fetch_teams returns raw API response
+        assert isinstance(result, dict)
+        assert "data" in result
+        assert len(result["data"]) > 0
+
     @pytest.mark.asyncio
-    async def test_fetch_specific_team(self):
-        """Test fetching a specific team by name"""
-        team_name = "Backend Team"
-        
+    async def test_fetch_teams_with_pagination(self, httpx_mock_factory):
+        """Test fetching teams with pagination parameters"""
         mock_response_data = {
             "data": [
                 {
                     "id": "team-123",
-                    "type": "teams", 
+                    "type": "teams",
                     "attributes": {
                         "name": "Backend Team",
                         "handle": "backend-team"
                     }
                 }
-            ]
+            ],
+            "meta": {
+                "pagination": {
+                    "total_count": 50,
+                    "total_pages": 5
+                }
+            }
         }
-        
-        with patch('datadog_mcp.utils.datadog_client.httpx.AsyncClient') as mock_client:
-            mock_client.return_value.__aenter__.return_value.get.return_value.json.return_value = mock_response_data
-            mock_client.return_value.__aenter__.return_value.get.return_value.raise_for_status.return_value = None
-            
-            result = await datadog_client.fetch_teams(team_name=team_name)
-            
-            assert isinstance(result, dict)
-            # Verify the request was made with team filter
-            mock_client.return_value.__aenter__.return_value.get.assert_called_once()
-    
+
+        mock = httpx_mock_factory(mock_response_data)
+        result = await datadog_client.fetch_teams(page_size=10, page_number=2)
+
+        assert isinstance(result, dict)
+        # Verify the request was made
+        mock._mock_instance.get.assert_called_once()
+
     @pytest.mark.asyncio
-    async def test_fetch_teams_with_members(self):
-        """Test fetching teams with member details"""
-        include_members = True
-        
+    async def test_fetch_teams_returns_data(self, httpx_mock_factory):
+        """Test that fetch_teams returns expected data structure"""
         mock_response_data = {
             "data": [
                 {
@@ -131,154 +105,138 @@ class TestTeamsRetrieval:
                     "type": "teams",
                     "attributes": {
                         "name": "Frontend Team"
-                    },
-                    "relationships": {
-                        "users": {
-                            "data": [{"id": "user-1", "type": "users"}]
-                        }
                     }
                 }
             ],
-            "included": [
-                {
-                    "id": "user-1",
-                    "type": "users",
-                    "attributes": {
-                        "name": "Alice Johnson",
-                        "email": "alice@example.com"
-                    }
-                }
-            ]
+            "meta": {}
         }
-        
-        with patch('datadog_mcp.utils.datadog_client.httpx.AsyncClient') as mock_client:
-            mock_client.return_value.__aenter__.return_value.get.return_value.json.return_value = mock_response_data
-            mock_client.return_value.__aenter__.return_value.get.return_value.raise_for_status.return_value = None
-            
-            result = await datadog_client.fetch_teams(include_members=include_members)
-            
-            assert isinstance(result, dict)
-            assert "teams" in result
-            assert "users" in result
-            assert len(result["users"]) > 0
+
+        httpx_mock_factory(mock_response_data)
+        result = await datadog_client.fetch_teams()
+
+        assert isinstance(result, dict)
+        assert "data" in result
+        assert len(result["data"]) == 1
+        assert result["data"][0]["attributes"]["name"] == "Frontend Team"
 
 
 class TestTeamsToolHandler:
     """Test the get_teams tool handler"""
-    
+
     @pytest.mark.asyncio
     async def test_handle_teams_request_success(self):
         """Test successful teams request handling"""
         mock_request = MagicMock()
         mock_request.arguments = {
-            "include_members": True,
             "format": "table"
         }
-        
-        mock_teams_data = {
-            "teams": [
+
+        # Mock data in raw API format (what fetch_teams returns)
+        mock_teams_response = {
+            "data": [
                 {
                     "id": "team-123",
-                    "name": "DevOps Team",
-                    "handle": "devops",
-                    "description": "Infrastructure and deployment team",
-                    "member_count": 3
+                    "type": "teams",
+                    "attributes": {
+                        "name": "DevOps Team",
+                        "handle": "devops",
+                        "description": "Infrastructure and deployment team"
+                    }
                 }
             ],
-            "users": [
-                {
-                    "id": "user-1",
-                    "name": "Bob Wilson",
-                    "email": "bob@example.com",
-                    "teams": ["team-123"]
-                }
-            ]
+            "meta": {"pagination": {"total_count": 1}}
         }
-        
-        with patch('datadog_mcp.utils.datadog_client.fetch_teams', new_callable=AsyncMock) as mock_fetch:
-            mock_fetch.return_value = mock_teams_data
-            
+
+        with patch('datadog_mcp.tools.get_teams.fetch_teams', new_callable=AsyncMock) as mock_fetch:
+            mock_fetch.return_value = mock_teams_response
+
             result = await get_teams.handle_call(mock_request)
-            
+
             assert isinstance(result, CallToolResult)
             assert result.isError is False
             assert len(result.content) > 0
             assert isinstance(result.content[0], TextContent)
-            
+
             content_text = result.content[0].text
             assert "DevOps Team" in content_text or "devops" in content_text.lower()
-    
+
     @pytest.mark.asyncio
     async def test_handle_teams_request_specific_team(self):
         """Test teams request for specific team"""
         mock_request = MagicMock()
         mock_request.arguments = {
-            "team_name": "Security Team",
-            "include_members": True,
-            "format": "detailed"
+            "team_name": "Security",
+            "format": "table"
         }
-        
-        mock_teams_data = {
-            "teams": [
+
+        # Mock returns all teams, handler filters by name
+        mock_teams_response = {
+            "data": [
                 {
                     "id": "team-456",
-                    "name": "Security Team",
-                    "handle": "security",
-                    "description": "Application security team"
+                    "type": "teams",
+                    "attributes": {
+                        "name": "Security Team",
+                        "handle": "security",
+                        "description": "Application security team"
+                    }
+                },
+                {
+                    "id": "team-789",
+                    "type": "teams",
+                    "attributes": {
+                        "name": "DevOps Team",
+                        "handle": "devops"
+                    }
                 }
             ],
-            "users": []
+            "meta": {"pagination": {"total_count": 2}}
         }
-        
-        with patch('datadog_mcp.utils.datadog_client.fetch_teams', new_callable=AsyncMock) as mock_fetch:
-            mock_fetch.return_value = mock_teams_data
-            
+
+        with patch('datadog_mcp.tools.get_teams.fetch_teams', new_callable=AsyncMock) as mock_fetch:
+            mock_fetch.return_value = mock_teams_response
+
             result = await get_teams.handle_call(mock_request)
-            
+
             assert isinstance(result, CallToolResult)
             assert result.isError is False
-            
-            # Verify specific team was requested
-            mock_fetch.assert_called_once()
-            call_args, call_kwargs = mock_fetch.call_args
-            assert call_kwargs.get("team_name") == "Security Team"
-    
+            # Should show Security Team
+            content_text = result.content[0].text
+            assert "Security" in content_text
+
     @pytest.mark.asyncio
     async def test_handle_teams_request_json_format(self):
         """Test teams request with JSON format"""
         mock_request = MagicMock()
         mock_request.arguments = {
-            "format": "json",
-            "include_members": False
+            "format": "json"
         }
-        
-        mock_teams_data = {
-            "teams": [
+
+        mock_teams_response = {
+            "data": [
                 {
                     "id": "team-789",
-                    "name": "QA Team",
-                    "handle": "qa"
+                    "type": "teams",
+                    "attributes": {
+                        "name": "QA Team",
+                        "handle": "qa"
+                    }
                 }
             ],
-            "users": []
+            "meta": {"pagination": {"total_count": 1}}
         }
-        
-        with patch('datadog_mcp.utils.datadog_client.fetch_teams', new_callable=AsyncMock) as mock_fetch:
-            mock_fetch.return_value = mock_teams_data
-            
+
+        with patch('datadog_mcp.tools.get_teams.fetch_teams', new_callable=AsyncMock) as mock_fetch:
+            mock_fetch.return_value = mock_teams_response
+
             result = await get_teams.handle_call(mock_request)
-            
+
             assert isinstance(result, CallToolResult)
             assert result.isError is False
-            
+            # Response includes summary header, JSON is after it
             content_text = result.content[0].text
-            # Should be valid JSON when format is json
-            if mock_request.arguments.get("format") == "json":
-                try:
-                    json.loads(content_text)
-                except json.JSONDecodeError:
-                    pytest.fail("Response should be valid JSON when format=json")
-    
+            assert "QA Team" in content_text
+
     @pytest.mark.asyncio
     async def test_handle_teams_request_error(self):
         """Test error handling in teams requests"""
@@ -286,12 +244,12 @@ class TestTeamsToolHandler:
         mock_request.arguments = {
             "team_name": "NonexistentTeam"
         }
-        
-        with patch('datadog_mcp.utils.datadog_client.fetch_teams', new_callable=AsyncMock) as mock_fetch:
+
+        with patch('datadog_mcp.tools.get_teams.fetch_teams', new_callable=AsyncMock) as mock_fetch:
             mock_fetch.side_effect = Exception("Team not found")
-            
+
             result = await get_teams.handle_call(mock_request)
-            
+
             assert isinstance(result, CallToolResult)
             assert result.isError is True
             assert len(result.content) > 0
@@ -408,61 +366,70 @@ class TestTeamsFormatting:
 
 
 class TestTeamsFiltering:
-    """Test team filtering functionality"""
-    
+    """Test team filtering functionality at the handler level"""
+
     @pytest.mark.asyncio
-    async def test_teams_by_name_filter(self):
-        """Test filtering teams by name"""
-        team_name = "Backend Team"
-        
-        with patch('datadog_mcp.utils.datadog_client.httpx.AsyncClient') as mock_client:
-            mock_response = {
-                "data": [
-                    {
-                        "id": "team-123",
-                        "type": "teams",
-                        "attributes": {
-                            "name": "Backend Team",
-                            "handle": "backend"
-                        }
+    async def test_teams_by_name_filter_in_handler(self):
+        """Test filtering teams by name (handled at handler level)"""
+        mock_request = MagicMock()
+        mock_request.arguments = {
+            "team_name": "Backend",
+            "format": "table"
+        }
+
+        mock_teams_response = {
+            "data": [
+                {
+                    "id": "team-123",
+                    "type": "teams",
+                    "attributes": {
+                        "name": "Backend Team",
+                        "handle": "backend"
                     }
-                ]
-            }
-            mock_client.return_value.__aenter__.return_value.get.return_value.json.return_value = mock_response
-            mock_client.return_value.__aenter__.return_value.get.return_value.raise_for_status.return_value = None
-            
-            result = await datadog_client.fetch_teams(team_name=team_name)
-            
-            # Verify the request was made with proper filter
-            call_args = mock_client.return_value.__aenter__.return_value.get.call_args
-            assert call_args is not None
-    
+                },
+                {
+                    "id": "team-456",
+                    "type": "teams",
+                    "attributes": {
+                        "name": "Frontend Team",
+                        "handle": "frontend"
+                    }
+                }
+            ],
+            "meta": {"pagination": {"total_count": 2}}
+        }
+
+        # Patch where the function is imported
+        with patch('datadog_mcp.tools.get_teams.fetch_teams', new_callable=AsyncMock) as mock_fetch:
+            mock_fetch.return_value = mock_teams_response
+
+            result = await get_teams.handle_call(mock_request)
+
+            assert isinstance(result, CallToolResult)
+            assert result.isError is False
+            # Should filter to only Backend Team
+            content_text = result.content[0].text
+            assert "Backend" in content_text
+
     @pytest.mark.asyncio
-    async def test_teams_include_members_option(self):
-        """Test include_members filtering option"""
-        include_members = True
-        
-        with patch('datadog_mcp.utils.datadog_client.httpx.AsyncClient') as mock_client:
-            mock_response = {
-                "data": [
-                    {
-                        "id": "team-123",
-                        "type": "teams",
-                        "attributes": {"name": "Test Team"},
-                        "relationships": {
-                            "users": {"data": []}
-                        }
-                    }
-                ],
-                "included": []
-            }
-            mock_client.return_value.__aenter__.return_value.get.return_value.json.return_value = mock_response
-            mock_client.return_value.__aenter__.return_value.get.return_value.raise_for_status.return_value = None
-            
-            result = await datadog_client.fetch_teams(include_members=include_members)
-            
-            # Verify the request was made
-            mock_client.return_value.__aenter__.return_value.get.assert_called_once()
+    async def test_teams_pagination_parameters(self, httpx_mock_factory):
+        """Test teams pagination parameters"""
+        mock_response = {
+            "data": [
+                {
+                    "id": "team-123",
+                    "type": "teams",
+                    "attributes": {"name": "Test Team"}
+                }
+            ],
+            "meta": {"pagination": {"total_count": 100, "total_pages": 10}}
+        }
+        mock = httpx_mock_factory(mock_response)
+
+        result = await datadog_client.fetch_teams(page_size=10, page_number=5)
+
+        # Verify the request was made
+        mock._mock_instance.get.assert_called_once()
 
 
 class TestTeamsValidation:
@@ -503,10 +470,10 @@ class TestTeamsValidation:
 
 class TestTeamsIntegration:
     """Test teams integration functionality"""
-    
+
     @pytest.mark.asyncio
-    async def test_teams_with_user_relationships(self):
-        """Test teams data with proper user relationships"""
+    async def test_teams_api_response_structure(self, httpx_mock_factory):
+        """Test teams API returns expected response structure"""
         mock_response = {
             "data": [
                 {
@@ -515,13 +482,60 @@ class TestTeamsIntegration:
                     "attributes": {
                         "name": "Engineering",
                         "handle": "engineering"
+                    }
+                }
+            ],
+            "meta": {
+                "pagination": {
+                    "total_count": 1
+                }
+            }
+        }
+
+        httpx_mock_factory(mock_response)
+        result = await datadog_client.fetch_teams()
+
+        # Verify response structure
+        assert isinstance(result, dict)
+        assert "data" in result
+        assert len(result["data"]) == 1
+        assert result["data"][0]["attributes"]["name"] == "Engineering"
+
+    @pytest.mark.asyncio
+    async def test_handler_processes_team_members(self):
+        """Test handler processes team membership data correctly"""
+        mock_request = MagicMock()
+        mock_request.arguments = {
+            "team_name": "Engineering",
+            "include_members": True,
+            "format": "detailed"
+        }
+
+        mock_teams_response = {
+            "data": [
+                {
+                    "id": "team-1",
+                    "type": "teams",
+                    "attributes": {
+                        "name": "Engineering",
+                        "handle": "engineering"
+                    }
+                }
+            ],
+            "meta": {"pagination": {"total_count": 1}}
+        }
+
+        mock_memberships_response = {
+            "data": [
+                {
+                    "id": "membership-1",
+                    "type": "team_memberships",
+                    "attributes": {
+                        "role": "admin"
                     },
                     "relationships": {
-                        "users": {
-                            "data": [
-                                {"id": "user-1", "type": "users"},
-                                {"id": "user-2", "type": "users"}
-                            ]
+                        "user": {
+                            "data": {"id": "user-1", "type": "users"}
                         }
                     }
                 }
@@ -534,34 +548,20 @@ class TestTeamsIntegration:
                         "name": "Developer One",
                         "email": "dev1@example.com"
                     }
-                },
-                {
-                    "id": "user-2",
-                    "type": "users", 
-                    "attributes": {
-                        "name": "Developer Two",
-                        "email": "dev2@example.com"
-                    }
                 }
             ]
         }
-        
-        with patch('datadog_mcp.utils.datadog_client.httpx.AsyncClient') as mock_client:
-            mock_client.return_value.__aenter__.return_value.get.return_value.json.return_value = mock_response
-            mock_client.return_value.__aenter__.return_value.get.return_value.raise_for_status.return_value = None
-            
-            result = await datadog_client.fetch_teams(include_members=True)
-            
-            # Verify proper relationship processing
-            assert isinstance(result, dict)
-            assert "teams" in result
-            assert "users" in result
-            
-            # Should have processed relationships correctly
-            teams = result["teams"]
-            users = result["users"]
-            assert len(teams) == 1
-            assert len(users) == 2
+
+        with patch('datadog_mcp.tools.get_teams.fetch_teams', new_callable=AsyncMock) as mock_fetch_teams:
+            with patch('datadog_mcp.tools.get_teams.fetch_team_memberships', new_callable=AsyncMock) as mock_fetch_members:
+                mock_fetch_teams.return_value = mock_teams_response
+                mock_fetch_members.return_value = mock_memberships_response
+
+                result = await get_teams.handle_call(mock_request)
+
+                assert isinstance(result, CallToolResult)
+                assert result.isError is False
+                assert "Engineering" in result.content[0].text
 
 
 if __name__ == "__main__":

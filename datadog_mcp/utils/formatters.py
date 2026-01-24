@@ -75,12 +75,13 @@ def extract_log_info(log_events: List[Dict[str, Any]]) -> List[Dict[str, str]]:
             attrs = content.get("attributes", {})
             
             # Extract basic log info from content level
+            # Ensure all values are strings to prevent type errors in formatting
             log_entry = {
-                "timestamp": content.get("timestamp", ""),
-                "level": content.get("status", attrs.get("level", "unknown")),
-                "service": content.get("service", "unknown"),
-                "host": content.get("host", "unknown"),
-                "message": content.get("message", ""),
+                "timestamp": str(content.get("timestamp", "") or ""),
+                "level": str(content.get("status", attrs.get("level", "unknown")) or "unknown"),
+                "service": str(content.get("service", "unknown") or "unknown"),
+                "host": str(content.get("host", "unknown") or "unknown"),
+                "message": str(content.get("message", "") or ""),
             }
             
             # Add tags if available (much more comprehensive now)
@@ -98,12 +99,13 @@ def extract_log_info(log_events: List[Dict[str, Any]]) -> List[Dict[str, str]]:
             attrs = event["attributes"]
             
             # Extract basic log info
+            # Ensure all values are strings to prevent type errors in formatting
             log_entry = {
-                "timestamp": attrs.get("timestamp", ""),
-                "level": attrs.get("status", "unknown"),
-                "service": attrs.get("service", "unknown"),
-                "host": attrs.get("host", "unknown"),
-                "message": attrs.get("message", ""),
+                "timestamp": str(attrs.get("timestamp", "") or ""),
+                "level": str(attrs.get("status", "unknown") or "unknown"),
+                "service": str(attrs.get("service", "unknown") or "unknown"),
+                "host": str(attrs.get("host", "unknown") or "unknown"),
+                "message": str(attrs.get("message", "") or ""),
             }
             
             # Add tags if available
@@ -204,11 +206,11 @@ def format_logs_as_table(logs: List[Dict[str, str]], max_message_length: int = 8
             display_log["message"] = message[:max_message_length - 3] + "..."
         display_logs.append(display_log)
     
-    # Calculate column widths
+    # Calculate column widths (ensure values are strings for len())
     timestamp_width = 20  # Fixed width for timestamp
-    level_width = max(len("Level"), max(len(log.get("level", "")) for log in display_logs))
-    service_width = max(len("Service"), max(len(log.get("service", "")) for log in display_logs))
-    message_width = max(len("Message"), max(len(log.get("message", "")) for log in display_logs))
+    level_width = max(len("Level"), max(len(str(log.get("level", "") or "")) for log in display_logs))
+    service_width = max(len("Service"), max(len(str(log.get("service", "") or "")) for log in display_logs))
+    message_width = max(len("Message"), max(len(str(log.get("message", "") or "")) for log in display_logs))
     
     # Create table
     header = f"| {'Timestamp':<{timestamp_width}} | {'Level':<{level_width}} | {'Service':<{service_width}} | {'Message':<{message_width}} |"
@@ -216,10 +218,11 @@ def format_logs_as_table(logs: List[Dict[str, str]], max_message_length: int = 8
     
     lines = [header, separator]
     for log in display_logs:
-        timestamp = log.get("timestamp", "")[:timestamp_width]  # Truncate timestamp if needed
-        level = log.get("level", "")
-        service = log.get("service", "")
-        message = log.get("message", "")
+        # Ensure all values are strings before formatting
+        timestamp = str(log.get("timestamp", "") or "")[:timestamp_width]  # Truncate timestamp if needed
+        level = str(log.get("level", "") or "")
+        service = str(log.get("service", "") or "")
+        message = str(log.get("message", "") or "")
         
         line = f"| {timestamp:<{timestamp_width}} | {level:<{level_width}} | {service:<{service_width}} | {message:<{message_width}} |"
         lines.append(line)
@@ -234,10 +237,11 @@ def format_logs_as_text(logs: List[Dict[str, str]]) -> str:
     
     lines = []
     for log in logs:
-        timestamp = log.get("timestamp", "")
-        level = log.get("level", "").upper()
-        service = log.get("service", "")
-        message = log.get("message", "")
+        # Ensure all values are strings before formatting
+        timestamp = str(log.get("timestamp", "") or "")
+        level = str(log.get("level", "") or "").upper()
+        service = str(log.get("service", "") or "")
+        message = str(log.get("message", "") or "")
         
         line = f"[{timestamp}] {level} {service}: {message}"
         lines.append(line)
