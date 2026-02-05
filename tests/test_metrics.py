@@ -154,31 +154,29 @@ class TestMetricsToolHandlers:
             "aggregation": "avg",
             "format": "table"
         }
-        
+
+        # Use the series format that the tool expects
         mock_metrics_data = {
-            "data": {
-                "attributes": {
-                    "series": [
-                        {
-                            "metric": "system.cpu.user",
-                            "points": [[1640995200000, 25.5]],
-                            "tags": ["host:web-01"]
-                        }
-                    ]
+            "series": [
+                {
+                    "metric": "system.cpu.user",
+                    "pointlist": [[1640995200000, 25.5]],
+                    "tag_set": ["host:web-01"]
                 }
-            }
+            ]
         }
-        
-        with patch('datadog_mcp.utils.datadog_client.fetch_metrics', new_callable=AsyncMock) as mock_fetch:
+
+        # Patch at the module where it's imported (tools/get_metrics.py imports fetch_metrics)
+        with patch('datadog_mcp.tools.get_metrics.fetch_metrics', new_callable=AsyncMock) as mock_fetch:
             mock_fetch.return_value = mock_metrics_data
-            
+
             result = await get_metrics.handle_call(mock_request)
-            
+
             assert isinstance(result, CallToolResult)
             assert result.isError is False
             assert len(result.content) > 0
             assert isinstance(result.content[0], TextContent)
-            
+
             content_text = result.content[0].text
             assert "system.cpu.user" in content_text or "cpu" in content_text.lower()
     

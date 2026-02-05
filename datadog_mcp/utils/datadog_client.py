@@ -19,9 +19,8 @@ COOKIE_FILE_PATH = os.getenv("DD_COOKIE_FILE", DEFAULT_COOKIE_FILE)
 DEFAULT_CSRF_FILE = os.path.expanduser("~/.datadog_csrf")
 CSRF_FILE_PATH = os.getenv("DD_CSRF_FILE", DEFAULT_CSRF_FILE)
 
-# API key credentials (static, loaded once)
-DATADOG_API_KEY = os.getenv("DD_API_KEY")
-DATADOG_APP_KEY = os.getenv("DD_APP_KEY")
+# Import secrets provider for AWS Secrets Manager integration
+from .secrets_provider import get_secret_provider, is_aws_secrets_configured
 
 
 def get_cookie() -> Optional[str]:
@@ -127,21 +126,24 @@ def get_api_url() -> str:
 DATADOG_API_URL = "https://api.datadoghq.com"  # Default, overridden dynamically
 
 
-# Validate that at least one auth method is available at startup
-# (but allow cookie to be added later via file)
+# Log startup auth configuration
 _initial_cookie = get_cookie()
-if not _initial_cookie and (not DATADOG_API_KEY or not DATADOG_APP_KEY):
+if _initial_cookie:
+    logger.info("Cookie authentication configured")
+elif is_aws_secrets_configured():
+    logger.info("AWS Secrets Manager authentication configured (credentials fetched on first use)")
+else:
     logger.warning(
-        "No credentials configured. Set DD_COOKIE env var, "
-        f"create {COOKIE_FILE_PATH}, or set DD_API_KEY and DD_APP_KEY."
+        "No credentials configured. Set DD_COOKIE env var or "
+        f"create {COOKIE_FILE_PATH} for cookie auth, or ensure AWS SSO login for Secrets Manager."
     )
 
 
-def get_auth_headers(include_csrf: bool = False) -> Dict[str, str]:
+async def get_auth_headers(include_csrf: bool = False) -> Dict[str, str]:
     """Get authentication headers based on auth mode (read fresh each call).
 
-    Priority: Cookie (if available) > API keys
-    This allows dynamic cookie updates without restart while still supporting API keys.
+    Priority: Cookie (if available) > AWS Secrets Manager
+    This allows dynamic cookie updates without restart while supporting AWS secrets.
 
     Args:
         include_csrf: If True and using cookie auth, include x-csrf-token header.
@@ -160,17 +162,22 @@ def get_auth_headers(include_csrf: bool = False) -> Dict[str, str]:
             else:
                 logger.warning("CSRF token requested but not available. Some endpoints may fail.")
         return headers
-    elif DATADOG_API_KEY and DATADOG_APP_KEY:
+
+    # Try AWS Secrets Manager
+    provider = await get_secret_provider()
+    if provider:
+        credentials = await provider.get_credentials()
         return {
             "Content-Type": "application/json",
-            "DD-API-KEY": DATADOG_API_KEY,
-            "DD-APPLICATION-KEY": DATADOG_APP_KEY,
+            "DD-API-KEY": credentials.api_key,
+            "DD-APPLICATION-KEY": credentials.app_key,
         }
-    else:
-        raise ValueError(
-            "No Datadog credentials available. Set DD_COOKIE env var, "
-            f"create {COOKIE_FILE_PATH}, or set DD_API_KEY and DD_APP_KEY."
-        )
+
+    raise ValueError(
+        "No Datadog credentials available. Either:\n"
+        f"  1. Set DD_COOKIE env var or create {COOKIE_FILE_PATH} for cookie auth, or\n"
+        "  2. Run 'aws sso login' to authenticate for AWS Secrets Manager"
+    )
 
 
 async def fetch_ci_pipelines(
@@ -182,8 +189,8 @@ async def fetch_ci_pipelines(
 ) -> Dict[str, Any]:
     """Fetch CI pipelines from Datadog API."""
     url = f"{get_api_url()}/api/v2/ci/pipelines/events/search"
-    
-    headers = get_auth_headers()
+
+    headers = await get_auth_headers()
     
     # Build query filter
     query_parts = []
@@ -260,7 +267,7 @@ async def fetch_logs(
     if cookie:
         # Use internal UI endpoint for cookie auth
         url = f"{get_api_url()}/api/v1/logs-analytics/list"
-        headers = get_auth_headers(include_csrf=True)
+        headers = await get_auth_headers(include_csrf=True)
         # Add origin header required by internal endpoint
         headers["origin"] = "https://app.datadoghq.com"
 
@@ -377,7 +384,7 @@ async def fetch_logs(
     else:
         # Use public API endpoint for API key auth
         url = f"{get_api_url()}/api/v2/logs/events/search"
-        headers = get_auth_headers()
+        headers = await get_auth_headers()
 
         payload = {
             "filter": {
@@ -498,7 +505,7 @@ async def fetch_logs_filter_values(
 
     # API key auth: Use the aggregation endpoint
     url = f"{get_api_url()}/api/v2/logs/analytics/aggregate"
-    headers = get_auth_headers()
+    headers = await get_auth_headers()
 
     # Build base query
     base_query = query if query else "*"
@@ -595,7 +602,7 @@ async def fetch_teams(
     """Fetch teams from Datadog API."""
     url = f"{get_api_url()}/api/v2/team"
     
-    headers = get_auth_headers()
+    headers = await get_auth_headers()
     
     # Add pagination parameters
     params = {
@@ -620,7 +627,7 @@ async def fetch_team_memberships(team_id: str) -> List[Dict[str, Any]]:
     """Fetch team memberships from Datadog API."""
     url = f"{get_api_url()}/api/v2/team/{team_id}/memberships"
     
-    headers = get_auth_headers()
+    headers = await get_auth_headers()
     
     async with httpx.AsyncClient() as client:
         try:
@@ -656,7 +663,7 @@ async def fetch_metrics(
                   Do NOT use for gauge metrics (e.g., cpu.percent, memory.usage).
     """
     
-    headers = get_auth_headers()
+    headers = await get_auth_headers()
     
     # Build metric query
     query_parts = [f"{aggregation}:{metric_name}"]
@@ -740,7 +747,7 @@ async def fetch_metrics_list(
 ) -> Dict[str, Any]:
     """Fetch list of all available metrics from Datadog API."""
     
-    headers = get_auth_headers()
+    headers = await get_auth_headers()
     
     # Use the v2 metrics endpoint to list all metrics
     url = f"{get_api_url()}/api/v2/metrics"
@@ -783,7 +790,7 @@ async def fetch_metric_available_fields(
     This ensures we find both indexed infrastructure tags AND custom application tags.
     """
 
-    headers = get_auth_headers()
+    headers = await get_auth_headers()
 
     available_fields = set()
 
@@ -863,7 +870,7 @@ async def fetch_metric_field_values(
     which is more reliable than the metadata endpoint for custom tags.
     """
 
-    headers = get_auth_headers()
+    headers = await get_auth_headers()
 
     # Query the actual metric data grouped by the field to get all unique values
     # This is more reliable than /all-tags for custom application tags
@@ -921,7 +928,7 @@ async def fetch_service_definitions(
 ) -> Dict[str, Any]:
     """Fetch service definitions from Datadog API."""
     
-    headers = get_auth_headers()
+    headers = await get_auth_headers()
     
     # Use the service definitions endpoint
     url = f"{get_api_url()}/api/v2/services/definitions"
@@ -955,7 +962,7 @@ async def fetch_service_definition(
 ) -> Dict[str, Any]:
     """Fetch a single service definition from Datadog API."""
     
-    headers = get_auth_headers()
+    headers = await get_auth_headers()
     
     # Use the specific service definition endpoint
     url = f"{get_api_url()}/api/v2/services/definitions/{service_name}"
@@ -990,7 +997,7 @@ async def fetch_monitors(
 ) -> List[Dict[str, Any]]:
     """Fetch monitors from Datadog API."""
     
-    headers = get_auth_headers()
+    headers = await get_auth_headers()
     
     # Use the v1 monitors endpoint
     url = f"{get_api_url()}/api/v1/monitor"
@@ -1032,7 +1039,7 @@ async def fetch_slos(
     """Fetch SLOs from Datadog API."""
     url = f"{get_api_url()}/api/v1/slo"
     
-    headers = get_auth_headers()
+    headers = await get_auth_headers()
     
     params = {
         "limit": limit,
@@ -1063,7 +1070,7 @@ async def fetch_slo_details(slo_id: str) -> Dict[str, Any]:
     """Fetch detailed information for a specific SLO."""
     url = f"{get_api_url()}/api/v1/slo/{slo_id}"
     
-    headers = get_auth_headers()
+    headers = await get_auth_headers()
     
     async with httpx.AsyncClient() as client:
         try:
@@ -1089,7 +1096,7 @@ async def fetch_slo_history(
     """Fetch SLO history data."""
     url = f"{get_api_url()}/api/v1/slo/{slo_id}/history"
 
-    headers = get_auth_headers()
+    headers = await get_auth_headers()
 
     params = {
         "from_ts": from_ts,
@@ -1136,7 +1143,7 @@ async def fetch_traces(
     url = f"{get_api_url()}/api/v2/spans/events/search"
 
     # Traces API requires CSRF token when using cookie auth
-    headers = get_auth_headers(include_csrf=True)
+    headers = await get_auth_headers(include_csrf=True)
 
     # Build query filter
     query_parts = []
@@ -1242,7 +1249,7 @@ async def aggregate_traces(
     url = f"{get_api_url()}/api/v2/spans/analytics/aggregate"
 
     # Traces API requires CSRF token when using cookie auth
-    headers = get_auth_headers(include_csrf=True)
+    headers = await get_auth_headers(include_csrf=True)
 
     # Build query filter
     query_parts = []

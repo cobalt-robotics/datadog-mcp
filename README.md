@@ -67,35 +67,56 @@ Requires [uvx](https://github.com/astral-sh/uv). Alternatively use `pipx run dat
 
 ## Authentication
 
-Two authentication methods are supported. Use whichever is easier for your setup.
-
-| Method | Variables |
-|--------|-----------|
-| **API Keys** | `DD_API_KEY` + `DD_APP_KEY` |
-| **Cookie + CSRF** | `DD_COOKIE` + `DD_CSRF_TOKEN` |
-
-### Option 1: API Keys
-
-1. Go to [Datadog Organization Settings](https://app.datadoghq.com/organization-settings/)
-2. **API Keys** → Create/copy key → `DD_API_KEY`
-3. **Application Keys** → Create/copy key → `DD_APP_KEY`
-
+**Quick Start (AWS Secrets Manager - no config needed):**
 ```bash
-export DD_API_KEY="your-api-key"
-export DD_APP_KEY="your-app-key"
+aws sso login        # Login to AWS
+datadog-mcp          # Start the server
 ```
 
-### Option 2: Cookie + CSRF (v0.2.0+)
+The server uses sensible defaults - just ensure your Datadog credentials are stored in AWS Secrets Manager at the default paths.
 
-Use browser session cookies instead of API keys.
+### Default Configuration
 
-**To get your cookie and CSRF token:**
-1. Log into [app.datadoghq.com](https://app.datadoghq.com) in your browser
-2. Open DevTools (F12) → Network tab
-3. Find any request to `app.datadoghq.com`
-4. From the request headers, copy:
-   - `Cookie` header → look for `dogweb=...` and `dogwebu=...` values
-   - `x-csrf-token` header value
+| Setting | Default Value |
+|---------|---------------|
+| AWS Profile | `default` |
+| AWS Region | `us-west-2` |
+| API Key Secret | `/DEVELOPMENT/datadog/API_KEY` |
+| App Key Secret | `/DEVELOPMENT/datadog/APP_KEY` |
+
+**Required IAM permissions:**
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": [
+      "secretsmanager:GetSecretValue",
+      "secretsmanager:DescribeSecret"
+    ],
+    "Resource": [
+      "arn:aws:secretsmanager:*:*:secret:/DEVELOPMENT/datadog/*"
+    ]
+  }]
+}
+```
+
+### Override Defaults (Optional)
+
+Set environment variables only if you need different values:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AWS_PROFILE` | `default` | AWS profile to use |
+| `AWS_REGION` | `us-west-2` | AWS region for Secrets Manager |
+| `AWS_SECRET_API_KEY` | `/DEVELOPMENT/datadog/API_KEY` | Secret path for API key |
+| `AWS_SECRET_APP_KEY` | `/DEVELOPMENT/datadog/APP_KEY` | Secret path for App key |
+| `AWS_ROLE_ARN` | None | IAM role to assume (optional) |
+| `SECRET_CACHE_TTL` | `3000` | Cache TTL in seconds |
+
+### Alternative: Cookie Authentication
+
+Cookie auth takes priority when configured. Use this for development/testing.
 
 **Via environment variables:**
 ```bash
@@ -110,7 +131,10 @@ echo "your-csrf-token" > ~/.datadog_csrf
 chmod 600 ~/.datadog_cookie ~/.datadog_csrf
 ```
 
-**Priority:** Cookie auth is used when available, otherwise falls back to API keys. Environment variables take precedence over files.
+To get your cookie and CSRF token:
+1. Log into [app.datadoghq.com](https://app.datadoghq.com)
+2. Open DevTools (F12) → Network tab
+3. Copy `Cookie` and `x-csrf-token` headers from any request
 
 ## Development
 

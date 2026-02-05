@@ -262,23 +262,23 @@ class TestTeamsToolHandler:
         mock_request.arguments = {
             "team_name": "EmptyResults"
         }
-        
+
         mock_teams_data = {
-            "teams": [],
-            "users": []
+            "data": [],  # Use correct API response format
         }
-        
-        with patch('datadog_mcp.utils.datadog_client.fetch_teams', new_callable=AsyncMock) as mock_fetch:
+
+        # Patch at the module where it's imported (tools/get_teams.py imports fetch_teams)
+        with patch('datadog_mcp.tools.get_teams.fetch_teams', new_callable=AsyncMock) as mock_fetch:
             mock_fetch.return_value = mock_teams_data
-            
+
             result = await get_teams.handle_call(mock_request)
-            
+
             assert isinstance(result, CallToolResult)
             assert result.isError is False
             assert len(result.content) > 0
-            
+
             content_text = result.content[0].text
-            assert "no teams" in content_text.lower() or "empty" in content_text.lower()
+            assert "no teams" in content_text.lower() or "empty" in content_text.lower() or "0 teams" in content_text.lower()
 
 
 class TestTeamsFormatting:

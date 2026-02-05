@@ -9,14 +9,44 @@ from unittest.mock import patch, MagicMock, AsyncMock
 
 @pytest.fixture
 def mock_env_credentials():
-    """Mock environment with valid Datadog credentials"""
-    with patch.dict(os.environ, {"DD_API_KEY": "test_key", "DD_APP_KEY": "test_app", "DD_COOKIE": ""}):
-        # Also patch the module-level variables that were set at import time
-        from datadog_mcp.utils import datadog_client
-        with patch.object(datadog_client, 'DATADOG_API_KEY', "test_key"):
-            with patch.object(datadog_client, 'DATADOG_APP_KEY', "test_app"):
-                with patch.object(datadog_client, 'get_cookie', return_value=None):
-                    yield
+    """Mock environment with valid Datadog credentials (via AWS Secrets Manager mock)"""
+    from datadog_mcp.utils import datadog_client
+    from datadog_mcp.utils.secrets_provider import DatadogCredentials
+    from datetime import datetime, timezone, timedelta
+
+    mock_creds = DatadogCredentials(
+        api_key="test_key",
+        app_key="test_app",
+        fetched_at=datetime.now(timezone.utc),
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+    )
+
+    mock_provider = AsyncMock()
+    mock_provider.get_credentials.return_value = mock_creds
+
+    with patch.dict(os.environ, {"DD_COOKIE": ""}, clear=False):
+        with patch.object(datadog_client, 'get_cookie', return_value=None):
+            with patch.object(datadog_client, 'get_secret_provider', return_value=mock_provider):
+                yield
+
+
+@pytest.fixture
+def mock_auth_headers():
+    """
+    Mock get_auth_headers to return test credentials.
+    Use this for tests that call API functions directly.
+    """
+    from datadog_mcp.utils import datadog_client
+
+    async def mock_get_auth_headers(include_csrf=False):
+        return {
+            "Content-Type": "application/json",
+            "DD-API-KEY": "test_key",
+            "DD-APPLICATION-KEY": "test_app",
+        }
+
+    with patch.object(datadog_client, 'get_auth_headers', mock_get_auth_headers):
+        yield
 
 
 @pytest.fixture
@@ -70,6 +100,20 @@ def create_httpx_mock(response_data):
     mock._mock_instance = mock_instance
     mock._patch = mock_client
 
+    # Also mock get_auth_headers to return test credentials
+    from datadog_mcp.utils import datadog_client
+
+    async def mock_get_auth_headers(include_csrf=False):
+        return {
+            "Content-Type": "application/json",
+            "DD-API-KEY": "test_key",
+            "DD-APPLICATION-KEY": "test_app",
+        }
+
+    auth_patch = patch.object(datadog_client, 'get_auth_headers', mock_get_auth_headers)
+    auth_patch.start()
+    mock._auth_patch = auth_patch
+
     return mock
 
 
@@ -96,6 +140,8 @@ def httpx_mock_factory():
     # Clean up all mocks
     for mock in mocks:
         mock._patch.stop()
+        if hasattr(mock, '_auth_patch'):
+            mock._auth_patch.stop()
 
 
 @pytest.fixture

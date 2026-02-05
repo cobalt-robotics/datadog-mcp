@@ -15,6 +15,7 @@ from mcp.server.stdio import stdio_server
 from mcp.types import Tool, ServerCapabilities, TextContent
 
 from .tools import get_fingerprints, list_pipelines, get_logs, get_teams, get_metrics, get_metric_fields, get_metric_field_values, list_metrics, list_service_definitions, get_service_definition, list_monitors, list_slos, get_logs_field_values, get_traces, aggregate_traces
+from .utils.secrets_provider import get_secret_provider, close_secret_provider, is_aws_secrets_configured
 
 # Configure logging
 logging.basicConfig(
@@ -129,6 +130,12 @@ async def async_main():
     """Async main entry point."""
     try:
         logger.info("Starting Datadog MCP Server...")
+
+        # Initialize AWS Secrets Manager provider if configured
+        # Credentials are fetched lazily on first tool call via get_auth_headers()
+        if is_aws_secrets_configured():
+            logger.info("AWS Secrets Manager configured (credentials will be fetched on first use)")
+
         # Run the server using stdio transport
         async with stdio_server() as (read_stream, write_stream):
             logger.info("Server transport initialized")
@@ -146,6 +153,10 @@ async def async_main():
     except Exception as e:
         logger.error(f"Server startup failed: {e}")
         raise
+    finally:
+        # Clean up AWS Secrets Manager provider
+        await close_secret_provider()
+        logger.info("Datadog MCP Server shutdown complete")
 
 
 def cli_main():
