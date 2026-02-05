@@ -1,5 +1,5 @@
 [project]
-name = "datadog-mcp"
+name = "cobalt-datadog-mcp"
 version = "0.2.5"
 description = "Datadog MCP server"
 readme = "README.md"
@@ -27,6 +27,7 @@ build-backend = "hatchling.build"
 exclude = [".claude/", ".github/", ".circleci/", "tests/"]
 
 [tool.hatch.build.targets.wheel]
+packages = ["datadog_mcp"]
 exclude = [".claude/"]
 
 [tool.uv]
@@ -39,4 +40,4 @@ dev = [
 ]
 
 [project.scripts]
-datadog-mcp = "datadog_mcp.server:cli_main"
+cobalt-datadog-mcp = "datadog_mcp.server:cli_main"

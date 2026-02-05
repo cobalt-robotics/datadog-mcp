@@ -4,4 +4,4 @@ uv sync
 
 uv build
 
-uv tool install datadog-mcp
+uv tool install . --force

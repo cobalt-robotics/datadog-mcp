@@ -10,10 +10,38 @@ MCP server that gives Claude access to Datadog monitoring: metrics, logs, traces
 
 **Requires:** [Datadog credentials](#authentication) (API keys or browser cookies)
 
-### Claude Code
+### Claude Code (PyPI)
 ```bash
 claude mcp add datadog-mcp -e DD_API_KEY=xxx -e DD_APP_KEY=xxx
 ```
+
+### Claude Code (Cobalt)
+
+**Option 1: Install globally with the install script**
+```bash
+git clone https://github.com/cobalt-robotics/datadog-mcp.git && cd datadog-mcp
+./install.sh
+claude mcp add datadog-mcp --scope user -- cobalt-datadog-mcp
+```
+
+**Option 2: Add to user scope (runs from source)**
+```bash
+claude mcp add datadog-mcp --scope user -- uv run cobalt-datadog-mcp
+```
+
+**Option 3: Add `.mcp.json` to your project root**
+```json
+{
+  "mcpServers": {
+    "datadog": {
+      "command": "uv",
+      "args": ["run", "cobalt-datadog-mcp"]
+    }
+  }
+}
+```
+
+This enables the MCP server for that project only. Claude Code automatically discovers `.mcp.json` files.
 
 ### Claude Desktop
 

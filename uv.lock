@@ -312,6 +312,50 @@ wheels = [
 ]
 
 [[package]]
+name = "cobalt-datadog-mcp"
+version = "0.2.5"
+source = { editable = "." }
+dependencies = [
+    { name = "aioboto3" },
+    { name = "datadog-api-client" },
+    { name = "httpx" },
+    { name = "mcp" },
+]
+
+[package.optional-dependencies]
+test = [
+    { name = "moto" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-mock" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "aioboto3", specifier = ">=13.0.0" },
+    { name = "datadog-api-client", specifier = ">=2.39.0" },
+    { name = "httpx", specifier = ">=0.28.1" },
+    { name = "mcp", specifier = ">=1.9.4" },
+    { name = "moto", extras = ["secretsmanager"], marker = "extra == 'test'", specifier = ">=5.0.0" },
+    { name = "pytest", marker = "extra == 'test'", specifier = ">=7.0.0" },
+    { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.21.0" },
+    { name = "pytest-mock", marker = "extra == 'test'", specifier = ">=3.10.0" },
+]
+provides-extras = ["test"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=8.4.1" },
+    { name = "pytest-asyncio", specifier = ">=1.0.0" },
+]
+
+[[package]]
 name = "colorama"
 version = "0.4.6"
 source = { registry = "https://pypi.org/simple" }
@@ -386,50 +430,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/4f/d8/f29791914ccc1541e2fae513958a29690a5a9b43462b0228eb4540063915/datadog_api_client-2.39.0.tar.gz", hash = "sha256:011633adff7441b76d2f0a69f580760e0c0c0348e2ce74fe7efb5094aab68cf8", size = 3110096, upload-time = "2025-06-30T15:47:36.323Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/84/52/08eaf83aa4297900c2ad0d7ff19865ab14ae2a185f44c241566d52c8ce29/datadog_api_client-2.39.0-py3-none-any.whl", hash = "sha256:581da02d426c001e915a13d317481c819aa9ed61e08132e34376e7b549a15e02", size = 3690281, upload-time = "2025-06-30T15:47:33.646Z" },
-]
-
-[[package]]
-name = "datadog-mcp"
-version = "0.2.5"
-source = { editable = "." }
-dependencies = [
-    { name = "aioboto3" },
-    { name = "datadog-api-client" },
-    { name = "httpx" },
-    { name = "mcp" },
-]
-
-[package.optional-dependencies]
-test = [
-    { name = "moto" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "pytest-mock" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "aioboto3", specifier = ">=13.0.0" },
-    { name = "datadog-api-client", specifier = ">=2.39.0" },
-    { name = "httpx", specifier = ">=0.28.1" },
-    { name = "mcp", specifier = ">=1.9.4" },
-    { name = "moto", extras = ["secretsmanager"], marker = "extra == 'test'", specifier = ">=5.0.0" },
-    { name = "pytest", marker = "extra == 'test'", specifier = ">=7.0.0" },
-    { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.21.0" },
-    { name = "pytest-mock", marker = "extra == 'test'", specifier = ">=3.10.0" },
-]
-provides-extras = ["test"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "pytest", specifier = ">=8.4.1" },
-    { name = "pytest-asyncio", specifier = ">=1.0.0" },
 ]
 
 [[package]]
