@@ -5,7 +5,7 @@ Tests for authentication mechanisms (API keys and cookies)
 import os
 import tempfile
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 
 
 class TestCookieLoading:
@@ -78,55 +78,77 @@ class TestCookieLoading:
                     assert f.read() == "cookie_with_whitespace"
 
 
+@pytest.mark.asyncio
 class TestAuthHeaders:
-    """Tests for get_auth_headers function"""
+    """Tests for get_auth_headers function (async)"""
 
-    def test_auth_headers_with_cookie(self):
+    async def test_auth_headers_with_cookie(self):
         """Test that cookie auth headers are returned when cookie is available"""
         from datadog_mcp.utils import datadog_client
 
         with patch.object(datadog_client, 'get_cookie', return_value="test_cookie"):
-            headers = datadog_client.get_auth_headers()
+            headers = await datadog_client.get_auth_headers()
 
             assert headers["Content-Type"] == "application/json"
             assert headers["Cookie"] == "test_cookie"
             assert "DD-API-KEY" not in headers
 
-    def test_auth_headers_with_api_keys(self):
-        """Test that API key headers are returned when no cookie but keys are set"""
+    async def test_auth_headers_with_aws_secrets(self):
+        """Test that AWS Secrets Manager headers are returned when no cookie but AWS is configured"""
         from datadog_mcp.utils import datadog_client
+        from datadog_mcp.utils.secrets_provider import DatadogCredentials
+        from datetime import datetime, timezone, timedelta
+
+        mock_creds = DatadogCredentials(
+            api_key="test_api_key",
+            app_key="test_app_key",
+            fetched_at=datetime.now(timezone.utc),
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+        )
+
+        mock_provider = AsyncMock()
+        mock_provider.get_credentials.return_value = mock_creds
 
         with patch.object(datadog_client, 'get_cookie', return_value=None):
-            with patch.object(datadog_client, 'DATADOG_API_KEY', "test_api_key"):
-                with patch.object(datadog_client, 'DATADOG_APP_KEY', "test_app_key"):
-                    headers = datadog_client.get_auth_headers()
+            with patch.object(datadog_client, 'get_secret_provider', return_value=mock_provider):
+                headers = await datadog_client.get_auth_headers()
 
-                    assert headers["Content-Type"] == "application/json"
-                    assert headers["DD-API-KEY"] == "test_api_key"
-                    assert headers["DD-APPLICATION-KEY"] == "test_app_key"
-                    assert "Cookie" not in headers
+                assert headers["Content-Type"] == "application/json"
+                assert headers["DD-API-KEY"] == "test_api_key"
+                assert headers["DD-APPLICATION-KEY"] == "test_app_key"
+                assert "Cookie" not in headers
 
-    def test_auth_headers_cookie_takes_priority(self):
-        """Test that cookie auth takes priority over API keys"""
+    async def test_auth_headers_cookie_takes_priority(self):
+        """Test that cookie auth takes priority over AWS Secrets"""
         from datadog_mcp.utils import datadog_client
+        from datadog_mcp.utils.secrets_provider import DatadogCredentials
+        from datetime import datetime, timezone, timedelta
+
+        mock_creds = DatadogCredentials(
+            api_key="test_api_key",
+            app_key="test_app_key",
+            fetched_at=datetime.now(timezone.utc),
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+        )
+
+        mock_provider = AsyncMock()
+        mock_provider.get_credentials.return_value = mock_creds
 
         with patch.object(datadog_client, 'get_cookie', return_value="priority_cookie"):
-            with patch.object(datadog_client, 'DATADOG_API_KEY', "test_api_key"):
-                with patch.object(datadog_client, 'DATADOG_APP_KEY', "test_app_key"):
-                    headers = datadog_client.get_auth_headers()
+            with patch.object(datadog_client, 'get_secret_provider', return_value=mock_provider):
+                headers = await datadog_client.get_auth_headers()
 
-                    assert headers["Cookie"] == "priority_cookie"
-                    assert "DD-API-KEY" not in headers
+                assert headers["Cookie"] == "priority_cookie"
+                assert "DD-API-KEY" not in headers
 
-    def test_auth_headers_raises_when_no_credentials(self):
+    async def test_auth_headers_raises_when_no_credentials(self):
         """Test that ValueError is raised when no credentials are available"""
         from datadog_mcp.utils import datadog_client
 
         with patch.object(datadog_client, 'get_cookie', return_value=None):
-            with patch.object(datadog_client, 'DATADOG_API_KEY', None):
-                with patch.object(datadog_client, 'DATADOG_APP_KEY', None):
-                    with pytest.raises(ValueError, match="No Datadog credentials available"):
-                        datadog_client.get_auth_headers()
+            with patch.object(datadog_client, 'get_secret_provider', return_value=None):
+                with pytest.raises(ValueError, match="No Datadog credentials available"):
+                    await datadog_client.get_auth_headers()
 
 
 class TestAuthMode:
@@ -165,40 +187,52 @@ class TestAuthMode:
             assert datadog_client.get_api_url() == "https://api.datadoghq.com"
 
 
+@pytest.mark.asyncio
 class TestDynamicCookieUpdate:
     """Tests to verify cookies can be updated without restart"""
 
-    def test_cookie_change_reflected_immediately(self):
+    async def test_cookie_change_reflected_immediately(self):
         """Test that changing cookie file is reflected in next get_auth_headers call"""
         with tempfile.TemporaryDirectory() as tmpdir:
             cookie_file = os.path.join(tmpdir, "dynamic_cookie")
 
             from datadog_mcp.utils import datadog_client
+            from datadog_mcp.utils.secrets_provider import DatadogCredentials
+            from datetime import datetime, timezone, timedelta
+
+            # Mock AWS credentials for fallback
+            mock_creds = DatadogCredentials(
+                api_key="fallback_key",
+                app_key="fallback_app",
+                fetched_at=datetime.now(timezone.utc),
+                expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+            )
+            mock_provider = AsyncMock()
+            mock_provider.get_credentials.return_value = mock_creds
 
             with patch.dict(os.environ, {"DD_COOKIE": ""}, clear=False):
                 with patch.object(datadog_client, 'COOKIE_FILE_PATH', cookie_file):
-                    with patch.object(datadog_client, 'DATADOG_API_KEY', "fallback_key"):
-                        with patch.object(datadog_client, 'DATADOG_APP_KEY', "fallback_app"):
-                            # Initially no cookie file - should use API keys
-                            headers1 = datadog_client.get_auth_headers()
-                            assert "DD-API-KEY" in headers1
+                    with patch.object(datadog_client, 'get_secret_provider', return_value=mock_provider):
+                        # Initially no cookie file - should use AWS Secrets
+                        headers1 = await datadog_client.get_auth_headers()
+                        assert "DD-API-KEY" in headers1
 
-                            # Create cookie file
-                            with open(cookie_file, 'w') as f:
-                                f.write("new_cookie_value")
+                        # Create cookie file
+                        with open(cookie_file, 'w') as f:
+                            f.write("new_cookie_value")
 
-                            # Now should use cookie
-                            headers2 = datadog_client.get_auth_headers()
-                            assert headers2["Cookie"] == "new_cookie_value"
-                            assert "DD-API-KEY" not in headers2
+                        # Now should use cookie
+                        headers2 = await datadog_client.get_auth_headers()
+                        assert headers2["Cookie"] == "new_cookie_value"
+                        assert "DD-API-KEY" not in headers2
 
-                            # Update cookie file
-                            with open(cookie_file, 'w') as f:
-                                f.write("updated_cookie_value")
+                        # Update cookie file
+                        with open(cookie_file, 'w') as f:
+                            f.write("updated_cookie_value")
 
-                            # Should reflect update
-                            headers3 = datadog_client.get_auth_headers()
-                            assert headers3["Cookie"] == "updated_cookie_value"
+                        # Should reflect update
+                        headers3 = await datadog_client.get_auth_headers()
+                        assert headers3["Cookie"] == "updated_cookie_value"
 
 
 if __name__ == "__main__":

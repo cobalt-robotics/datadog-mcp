@@ -159,41 +159,61 @@ class TestServerIntegration:
 class TestEnvironmentConfiguration:
     """Test environment configuration requirements"""
 
-    def test_datadog_credentials_missing_logs_warning(self):
-        """Test that missing Datadog credentials logs a warning (allows cookie to be added later)"""
+    def test_datadog_credentials_logs_info_with_defaults(self):
+        """Test that with defaults, AWS Secrets Manager is configured and info is logged"""
         import importlib
         import logging
 
-        with patch.dict(os.environ, {}, clear=True):
+        # Clear env vars - defaults should apply
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("DD_COOKIE", None)
+            os.environ.pop("AWS_SECRET_API_KEY", None)
+            os.environ.pop("AWS_SECRET_APP_KEY", None)
+
             # Also need to ensure no cookie file exists
             with patch('datadog_mcp.utils.datadog_client.os.path.isfile', return_value=False):
-                with patch.object(logging.getLogger('datadog_mcp.utils.datadog_client'), 'warning') as mock_warn:
+                with patch.object(logging.getLogger('datadog_mcp.utils.datadog_client'), 'info') as mock_info:
+                    from datadog_mcp.utils import secrets_provider
                     from datadog_mcp.utils import datadog_client
+                    importlib.reload(secrets_provider)
                     importlib.reload(datadog_client)
-                    # Should log warning, not raise error
-                    mock_warn.assert_called()
+                    # Should log info about AWS Secrets Manager being configured
+                    mock_info.assert_called()
 
-    def test_get_auth_headers_raises_when_no_credentials(self):
+    @pytest.mark.asyncio
+    async def test_get_auth_headers_raises_when_no_credentials(self):
         """Test that get_auth_headers raises ValueError when no credentials available"""
         from datadog_mcp.utils import datadog_client
 
         with patch.object(datadog_client, 'get_cookie', return_value=None):
-            with patch.object(datadog_client, 'DATADOG_API_KEY', None):
-                with patch.object(datadog_client, 'DATADOG_APP_KEY', None):
-                    with pytest.raises(ValueError, match="No Datadog credentials available"):
-                        datadog_client.get_auth_headers()
+            with patch.object(datadog_client, 'get_secret_provider', return_value=None):
+                with pytest.raises(ValueError, match="No Datadog credentials available"):
+                    await datadog_client.get_auth_headers()
 
-    def test_datadog_credentials_present(self):
+    @pytest.mark.asyncio
+    async def test_datadog_credentials_present(self):
         """Test that valid credentials don't raise errors"""
-        with patch.dict(os.environ, {"DD_API_KEY": "test_key", "DD_APP_KEY": "test_app_key"}):
-            # Should not raise any errors
-            import importlib
-            from datadog_mcp.utils import datadog_client
-            importlib.reload(datadog_client)
+        from datadog_mcp.utils import datadog_client
+        from datadog_mcp.utils.secrets_provider import DatadogCredentials
+        from datetime import datetime, timezone, timedelta
 
-            # Verify credentials are loaded
-            assert datadog_client.DATADOG_API_KEY == "test_key"
-            assert datadog_client.DATADOG_APP_KEY == "test_app_key"
+        mock_creds = DatadogCredentials(
+            api_key="test_key",
+            app_key="test_app_key",
+            fetched_at=datetime.now(timezone.utc),
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+        )
+
+        mock_provider = AsyncMock()
+        mock_provider.get_credentials.return_value = mock_creds
+
+        with patch.object(datadog_client, 'get_cookie', return_value=None):
+            with patch.object(datadog_client, 'get_secret_provider', return_value=mock_provider):
+                headers = await datadog_client.get_auth_headers()
+
+                # Verify credentials are in headers
+                assert headers["DD-API-KEY"] == "test_key"
+                assert headers["DD-APPLICATION-KEY"] == "test_app_key"
 
 
 if __name__ == "__main__":

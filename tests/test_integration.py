@@ -110,15 +110,23 @@ class TestEnvironmentHandling:
             assert hasattr(datadog_client, 'get_auth_headers')
     
     def test_valid_credentials_accepted(self):
-        """Test that valid credentials work"""
-        with patch.dict(os.environ, {"DD_API_KEY": "test_key", "DD_APP_KEY": "test_app"}):
-            # Should not raise
+        """Test that AWS Secrets Manager is configured by default"""
+        # Clear env vars to test defaults
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("AWS_SECRET_API_KEY", None)
+            os.environ.pop("AWS_SECRET_APP_KEY", None)
+
             import importlib
             from datadog_mcp.utils import datadog_client
+            from datadog_mcp.utils import secrets_provider
+            importlib.reload(secrets_provider)
             importlib.reload(datadog_client)
-            
-            assert datadog_client.DATADOG_API_KEY == "test_key"
-            assert datadog_client.DATADOG_APP_KEY == "test_app"
+
+            # Verify secrets manager is configured with defaults
+            assert secrets_provider.is_aws_secrets_configured() is True
+            assert secrets_provider.AWS_SECRET_API_KEY == "/DEVELOPMENT/datadog/API_KEY"
+            assert secrets_provider.AWS_SECRET_APP_KEY == "/DEVELOPMENT/datadog/APP_KEY"
+            assert secrets_provider.AWS_PROFILE == "default"
 
 
 class TestToolParameters:

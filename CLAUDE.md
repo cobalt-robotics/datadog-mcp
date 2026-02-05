@@ -8,14 +8,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `uv sync` - Install dependencies using UV package manager
 - `uv run datadog_mcp/server.py` - Run the MCP server locally
 - `podman build -t datadog-mcp .` - Build Podman image
-- `podman-compose up` - Run with Podman Compose (requires DD_API_KEY and DD_APP_KEY env vars)
+- `podman-compose up` - Run with Podman Compose (requires AWS_SECRET_* or DD_COOKIE env vars)
 
 ### Testing
 - `uv run pytest tests/test_integration.py` - Test core server functionality (no API required)
 - `uv run pytest tests/test_tools_working.py` - Test tool functionality (no API required) 
 - `uv run pytest tests/` - Run all tests
 - Most tests use mocking and don't require real Datadog API credentials
-- For integration tests with real API, set DD_API_KEY and DD_APP_KEY environment variables
+- For integration tests with real API, configure AWS_SECRET_* or DD_COOKIE environment variables
 
 ### Syntax Checking
 - `uv run python -m py_compile datadog_mcp/server.py` - Check main server syntax
@@ -40,12 +40,21 @@ This is a **Model Context Protocol (MCP) server** that provides Datadog monitori
 - Consistent error handling and parameter validation patterns
 
 **`datadog_mcp/utils/datadog_client.py`** - Centralized Datadog API client that:
-- Manages authentication headers (DD_API_KEY, DD_APP_KEY)
+- Manages authentication headers via async `get_auth_headers()`
+- Supports cookie auth (priority) and AWS Secrets Manager
 - Implements all API endpoints (pipelines, logs, metrics, teams)
 - Handles multiple environments via array parameters
 - Supports aggregation_by for grouping metrics
 - Uses proper Datadog API endpoints (e.g., `/api/v2/metrics/{metric_name}/all-tags` for field discovery)
 - Constructs metric queries in Datadog format: `aggregation:metric{filters} by {fields}`
+
+**`datadog_mcp/utils/secrets_provider.py`** - AWS Secrets Manager integration that:
+- Fetches Datadog credentials from AWS Secrets Manager
+- Supports separate secrets (`AWS_SECRET_API_KEY`, `AWS_SECRET_APP_KEY`) or combined JSON secrets
+- Implements in-memory caching with TTL and automatic refresh
+- Uses `asyncio.Lock` for thread-safe concurrent access
+- Provides graceful degradation when AWS is temporarily unreachable
+- Leverages boto3's default credential chain (SSO, IAM roles, env vars)
 
 **`datadog_mcp/utils/formatters.py`** - Data transformation layer providing:
 - Multiple output formats (table, JSON, summary, timeseries)
@@ -143,9 +152,28 @@ if aggregation_by and aggregation_by != ["service"]:
 
 ## Configuration Requirements
 
-### Required Environment Variables
-- `DD_API_KEY` - Datadog API authentication key
-- `DD_APP_KEY` - Datadog application key for authorization
+### Authentication Options
+
+**Option 1: AWS Secrets Manager (default - no config needed)**
+
+Just run `aws sso login` and start the server. All settings have sensible defaults:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AWS_PROFILE` | `default` | AWS profile to use |
+| `AWS_SECRET_API_KEY` | `/DEVELOPMENT/datadog/API_KEY` | Secret path for API key |
+| `AWS_SECRET_APP_KEY` | `/DEVELOPMENT/datadog/APP_KEY` | Secret path for App key |
+| `AWS_REGION` | `us-west-2` | AWS region |
+| `AWS_ROLE_ARN` | None | Optional role to assume |
+| `SECRET_CACHE_TTL` | `3000` | Cache TTL in seconds |
+
+**Option 2: Cookie Authentication (takes priority when set)**
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DD_COOKIE` | None | Browser session cookie |
+| `DD_CSRF_TOKEN` | None | CSRF token for some endpoints |
+| `DD_COOKIE_FILE` | `~/.datadog_cookie` | Cookie file path |
+| `DD_CSRF_FILE` | `~/.datadog_csrf` | CSRF token file path |
 
 ### Python Requirements
 - Python 3.13+ (specified in pyproject.toml)

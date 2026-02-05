@@ -36,7 +36,7 @@ class TestTraceRetrieval:
     """Test trace retrieval functionality"""
 
     @pytest.mark.asyncio
-    async def test_fetch_traces_basic(self):
+    async def test_fetch_traces_basic(self, httpx_mock_factory):
         """Test basic trace fetching functionality"""
         # Mock the HTTP response
         mock_response_data = {
@@ -60,19 +60,13 @@ class TestTraceRetrieval:
             }
         }
 
-        with patch('datadog_mcp.utils.datadog_client.httpx.AsyncClient') as mock_client:
-            mock_response = AsyncMock()
-            mock_response.json = MagicMock(return_value=mock_response_data)
-            mock_response.raise_for_status = MagicMock()
+        httpx_mock_factory(mock_response_data)
+        result = await datadog_client.fetch_traces()
 
-            mock_client.return_value.__aenter__.return_value.post = AsyncMock(return_value=mock_response)
-
-            result = await datadog_client.fetch_traces()
-
-            assert isinstance(result, dict)
-            assert "data" in result
-            assert len(result["data"]) > 0
-            assert "attributes" in result["data"][0]
+        assert isinstance(result, dict)
+        assert "data" in result
+        assert len(result["data"]) > 0
+        assert "attributes" in result["data"][0]
 
     @pytest.mark.asyncio
     async def test_fetch_traces_with_filters(self):
@@ -103,18 +97,29 @@ class TestTraceRetrieval:
             }
         }
 
-        with patch('datadog_mcp.utils.datadog_client.httpx.AsyncClient') as mock_client:
-            mock_response = AsyncMock()
-            mock_response.json = MagicMock(return_value=mock_response_data)
-            mock_response.raise_for_status = MagicMock()
+        # Mock auth headers
+        from datadog_mcp.utils import datadog_client as dc
 
-            mock_client.return_value.__aenter__.return_value.post = AsyncMock(return_value=mock_response)
+        async def mock_get_auth_headers(include_csrf=False):
+            return {
+                "Content-Type": "application/json",
+                "DD-API-KEY": "test_key",
+                "DD-APPLICATION-KEY": "test_app",
+            }
 
-            result = await datadog_client.fetch_traces(filters=filters)
+        with patch.object(dc, 'get_auth_headers', mock_get_auth_headers):
+            with patch('datadog_mcp.utils.datadog_client.httpx.AsyncClient') as mock_client:
+                mock_response = AsyncMock()
+                mock_response.json = MagicMock(return_value=mock_response_data)
+                mock_response.raise_for_status = MagicMock()
 
-            assert isinstance(result, dict)
-            # Verify filter was applied (would be in the request payload)
-            mock_client.return_value.__aenter__.return_value.post.assert_called_once()
+                mock_client.return_value.__aenter__.return_value.post = AsyncMock(return_value=mock_response)
+
+                result = await datadog_client.fetch_traces(filters=filters)
+
+                assert isinstance(result, dict)
+                # Verify filter was applied (would be in the request payload)
+                mock_client.return_value.__aenter__.return_value.post.assert_called_once()
 
 
 class TestTraceToolHandler:
@@ -341,95 +346,76 @@ class TestTraceFiltering:
     """Test trace filtering functionality"""
 
     @pytest.mark.asyncio
-    async def test_traces_with_service_filter(self):
+    async def test_traces_with_service_filter(self, httpx_mock_factory):
         """Test filtering traces by service"""
         filters = {"service": "web-api"}
 
-        with patch('datadog_mcp.utils.datadog_client.httpx.AsyncClient') as mock_client:
-            mock_response_data = {
-                "data": [
-                    {
-                        "id": "trace-1",
-                        "attributes": {
-                            "service": "web-api",
-                            "resource_name": "GET /api/status"
-                        }
+        mock_response_data = {
+            "data": [
+                {
+                    "id": "trace-1",
+                    "attributes": {
+                        "service": "web-api",
+                        "resource_name": "GET /api/status"
                     }
-                ],
-                "meta": {"page": {}}
-            }
+                }
+            ],
+            "meta": {"page": {}}
+        }
 
-            mock_response = AsyncMock()
-            mock_response.json = MagicMock(return_value=mock_response_data)
-            mock_response.raise_for_status = MagicMock()
+        mock = httpx_mock_factory(mock_response_data)
+        result = await datadog_client.fetch_traces(filters=filters)
 
-            mock_client.return_value.__aenter__.return_value.post = AsyncMock(return_value=mock_response)
+        # Verify the request was made with proper filters
+        call_args = mock._mock_instance.post.call_args
+        assert call_args is not None
 
-            result = await datadog_client.fetch_traces(filters=filters)
-
-            # Verify the request was made with proper filters
-            call_args = mock_client.return_value.__aenter__.return_value.post.call_args
-            assert call_args is not None
-
-            # Verify the query string includes the filter
-            payload = call_args.kwargs['json']
-            query_str = payload['data']['attributes']['filter']['query']
-            assert 'service:web-api' in query_str
+        # Verify the query string includes the filter
+        payload = call_args.kwargs['json']
+        query_str = payload['data']['attributes']['filter']['query']
+        assert 'service:web-api' in query_str
 
     @pytest.mark.asyncio
-    async def test_traces_with_time_range(self):
+    async def test_traces_with_time_range(self, httpx_mock_factory):
         """Test filtering traces by time range"""
         time_range = "4h"
 
-        with patch('datadog_mcp.utils.datadog_client.httpx.AsyncClient') as mock_client:
-            mock_response_data = {"data": [], "meta": {"page": {}}}
+        mock_response_data = {"data": [], "meta": {"page": {}}}
+        mock = httpx_mock_factory(mock_response_data)
+        result = await datadog_client.fetch_traces(time_range=time_range)
 
-            mock_response = AsyncMock()
-            mock_response.json = MagicMock(return_value=mock_response_data)
-            mock_response.raise_for_status = MagicMock()
-
-            mock_client.return_value.__aenter__.return_value.post = AsyncMock(return_value=mock_response)
-
-            result = await datadog_client.fetch_traces(time_range=time_range)
-
-            # Verify the request was made
-            mock_client.return_value.__aenter__.return_value.post.assert_called_once()
+        # Verify the request was made
+        mock._mock_instance.post.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_traces_with_error_filter(self):
+    async def test_traces_with_error_filter(self, httpx_mock_factory):
         """Test filtering traces with error status"""
         filters = {"status": "error"}
 
-        with patch('datadog_mcp.utils.datadog_client.httpx.AsyncClient') as mock_client:
-            mock_response_data = {
-                "data": [
-                    {
-                        "id": "trace-error",
-                        "attributes": {
-                            "service": "web-api",
-                            "status": "error",
-                            "error": True,
-                            "error.message": "Internal error"
-                        }
+        mock_response_data = {
+            "data": [
+                {
+                    "id": "trace-error",
+                    "attributes": {
+                        "service": "web-api",
+                        "status": "error",
+                        "error": True,
+                        "error.message": "Internal error"
                     }
-                ],
-                "meta": {"page": {}}
-            }
+                }
+            ],
+            "meta": {"page": {}}
+        }
 
-            mock_response = AsyncMock()
-            mock_response.json = MagicMock(return_value=mock_response_data)
-            mock_response.raise_for_status = MagicMock()
+        mock = httpx_mock_factory(mock_response_data)
+        result = await datadog_client.fetch_traces(filters=filters)
 
-            mock_client.return_value.__aenter__.return_value.post = AsyncMock(return_value=mock_response)
-
-            result = await datadog_client.fetch_traces(filters=filters)
-
-            # Verify the request was made
-            call_args = mock_client.return_value.__aenter__.return_value.post.call_args
-            assert call_args is not None
+        # Verify the request was made
+        call_args = mock._mock_instance.post.call_args
+        assert call_args is not None
 
     @pytest.mark.asyncio
-    async def test_traces_with_multiple_filters_and_special_chars(self):
+    async def test_traces_with_multiple_filters_and_special_chars(self, httpx_mock_factory):
         """Test filtering with multiple filters and special characters"""
         filters = {
             "service": "web-api",
@@ -437,28 +423,21 @@ class TestTraceFiltering:
             "resource_name": "GET /api/users"  # Has spaces, should be quoted
         }
 
-        with patch('datadog_mcp.utils.datadog_client.httpx.AsyncClient') as mock_client:
-            mock_response_data = {"data": [], "meta": {"page": {}}}
+        mock_response_data = {"data": [], "meta": {"page": {}}}
+        mock = httpx_mock_factory(mock_response_data)
+        result = await datadog_client.fetch_traces(filters=filters)
 
-            mock_response = AsyncMock()
-            mock_response.json = MagicMock(return_value=mock_response_data)
-            mock_response.raise_for_status = MagicMock()
+        # Verify the query string is built correctly
+        call_args = mock._mock_instance.post.call_args
+        payload = call_args.kwargs['json']
+        query_str = payload['data']['attributes']['filter']['query']
 
-            mock_client.return_value.__aenter__.return_value.post = AsyncMock(return_value=mock_response)
-
-            result = await datadog_client.fetch_traces(filters=filters)
-
-            # Verify the query string is built correctly
-            call_args = mock_client.return_value.__aenter__.return_value.post.call_args
-            payload = call_args.kwargs['json']
-            query_str = payload['data']['attributes']['filter']['query']
-
-            # Should contain all filters joined with AND
-            assert 'service:web-api' in query_str
-            assert 'env:production' in query_str
-            # Resource name with spaces should be quoted
-            assert 'resource_name:"GET /api/users"' in query_str
-            assert ' AND ' in query_str
+        # Should contain all filters joined with AND
+        assert 'service:web-api' in query_str
+        assert 'env:production' in query_str
+        # Resource name with spaces should be quoted
+        assert 'resource_name:"GET /api/users"' in query_str
+        assert ' AND ' in query_str
 
 
 if __name__ == "__main__":
